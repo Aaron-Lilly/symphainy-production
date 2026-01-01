@@ -1,0 +1,1 @@
+Copybook placeholder for 80-byte fixed-width record

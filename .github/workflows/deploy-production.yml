@@ -1,0 +1,84 @@
+name: Deploy to Production (GCE VM)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          cd symphainy-platform
+          pip install poetry
+          poetry install --no-root
+      
+      - name: Run smoke tests
+        run: |
+          cd tests
+          python3 -m pytest tests/e2e/production/smoke_tests/ -v --tb=short
+        continue-on-error: true  # Don't fail deployment if tests fail (for now)
+      
+      - name: Run API contract tests
+        run: |
+          cd tests
+          python3 -m pytest tests/e2e/production/api_contracts/ -v --tb=short
+        continue-on-error: true
+  
+  deploy:
+    needs: test  # Run after tests (but don't require them to pass - see continue-on-error above)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Deploy to GCE VM
+        uses: appleboy/ssh-action@master
+        with:
+          host: 35.215.64.103
+          username: founders
+          key: ${{ secrets.GCE_SSH_KEY }}
+          script: |
+            cd /home/founders/demoversion/symphainy_source
+            git pull origin main || git pull origin develop
+            chmod +x scripts/vm-staging-deploy.sh
+            ./scripts/vm-staging-deploy.sh
+      
+      - name: Health Check
+        uses: appleboy/ssh-action@master
+        with:
+          host: 35.215.64.103
+          username: founders
+          key: ${{ secrets.GCE_SSH_KEY }}
+          script: |
+            echo "⏳ Waiting for services to start..."
+            sleep 30
+            
+            echo "🏥 Checking backend health..."
+            if curl -f http://localhost:8000/health; then
+              echo "✅ Backend is healthy"
+            else
+              echo "❌ Backend health check failed"
+              exit 1
+            fi
+            
+            echo "🏥 Checking frontend health..."
+            if curl -f http://localhost:3000; then
+              echo "✅ Frontend is healthy"
+            else
+              echo "❌ Frontend health check failed"
+              exit 1
+            fi
+            
+            echo "✅ All health checks passed!"
+

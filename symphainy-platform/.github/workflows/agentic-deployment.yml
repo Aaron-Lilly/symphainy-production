@@ -1,0 +1,248 @@
+name: Agentic Deployment
+
+on:
+  push:
+    paths:
+      - 'agentic/**'
+      - 'backend/**/agents/**'
+  workflow_dispatch:
+    inputs:
+      agent_type:
+        description: 'Agent type to deploy'
+        required: true
+        type: choice
+        options:
+        - all
+        - smart-city
+        - business-enablement
+        - experience
+        - journey
+      deployment_strategy:
+        description: 'Deployment strategy'
+        required: true
+        default: 'blue-green'
+        type: choice
+        options:
+        - blue-green
+        - canary
+        - rolling
+
+jobs:
+  # Agent registry and discovery
+  agent-discovery:
+    runs-on: ubuntu-latest
+    name: Agent Discovery
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: poetry install --only main
+      
+    - name: Discover agents
+      run: |
+        echo "🔍 Discovering agents across domains..."
+        poetry run python -c "
+        from agentic.agentic_manager_service import AgenticManagerService
+        import asyncio
+        import json
+        
+        async def discover_agents():
+            manager = AgenticManagerService()
+            agents = await manager.get_all_agents()
+            print('Discovered agents:')
+            print(json.dumps(agents, indent=2))
+        
+        asyncio.run(discover_agents())
+        "
+
+  # Agent testing
+  agent-testing:
+    runs-on: ubuntu-latest
+    name: Agent Testing
+    needs: agent-discovery
+    
+    strategy:
+      matrix:
+        agent_type: [smart-city, business-enablement, experience, journey]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: poetry install --only main
+      
+    - name: Test ${{ matrix.agent_type }} agents
+      run: |
+        echo "🧪 Testing ${{ matrix.agent_type }} agents..."
+        poetry run python -c "
+        from agentic.agentic_manager_service import AgenticManagerService
+        import asyncio
+        
+        async def test_agents():
+            manager = AgenticManagerService()
+            agents = await manager.get_domain_agents('${{ matrix.agent_type }}')
+            print(f'Testing {len(agents.get(\"agents\", []))} agents in ${{ matrix.agent_type }} domain')
+            
+            for agent in agents.get('agents', []):
+                agent_id = agent.get('id')
+                if agent_id:
+                    health = await manager.get_agent_health(agent_id)
+                    performance = await manager.get_agent_performance(agent_id)
+                    print(f'Agent {agent_id}: Health={health.get(\"health\", {}).get(\"status\")}, Performance={performance.get(\"performance\", {}).get(\"response_time\")}')
+        
+        asyncio.run(test_agents())
+        "
+
+  # Agent deployment
+  agent-deployment:
+    runs-on: ubuntu-latest
+    name: Agent Deployment
+    needs: [agent-discovery, agent-testing]
+    if: github.ref == 'refs/heads/main' || github.event.inputs.agent_type != 'all'
+    
+    strategy:
+      matrix:
+        agent_type: [smart-city, business-enablement, experience, journey]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: poetry install --only main
+      
+    - name: Deploy ${{ matrix.agent_type }} agents
+      run: |
+        echo "🚀 Deploying ${{ matrix.agent_type }} agents..."
+        poetry run python -c "
+        from agentic.agentic_manager_service import AgenticManagerService
+        import asyncio
+        
+        async def deploy_agents():
+            manager = AgenticManagerService()
+            agents = await manager.get_domain_agents('${{ matrix.agent_type }}')
+            
+            for agent in agents.get('agents', []):
+                agent_id = agent.get('id')
+                if agent_id:
+                    result = await manager.deploy_agent(agent_id, 'latest')
+                    print(f'Deployed {agent_id}: {result.get(\"deployment\", {}).get(\"status\")}')
+        
+        asyncio.run(deploy_agents())
+        "
+
+  # Agent monitoring
+  agent-monitoring:
+    runs-on: ubuntu-latest
+    name: Agent Monitoring
+    needs: [agent-discovery, agent-testing, agent-deployment]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: poetry install --only main
+      
+    - name: Monitor agent health
+      run: |
+        echo "🏥 Monitoring agent health..."
+        poetry run python -c "
+        from agentic.agent_dashboard_service import AgentDashboardService
+        import asyncio
+        import json
+        
+        async def monitor_agents():
+            dashboard = AgentDashboardService()
+            health = await dashboard.get_agent_health_dashboard()
+            performance = await dashboard.get_agent_performance_dashboard()
+            
+            print('Agent Health Dashboard:')
+            print(json.dumps(health, indent=2))
+            print('\\nAgent Performance Dashboard:')
+            print(json.dumps(performance, indent=2))
+        
+        asyncio.run(monitor_agents())
+        "
+        
+    - name: Generate agent report
+      run: |
+        echo "📊 Generating agent report..."
+        poetry run python -c "
+        from agentic.agent_dashboard_service import AgentDashboardService
+        import asyncio
+        import json
+        
+        async def generate_report():
+            dashboard = AgentDashboardService()
+            report = await dashboard.get_comprehensive_dashboard()
+            print('Agent Report:')
+            print(json.dumps(report, indent=2))
+        
+        asyncio.run(generate_report())
+        "
+        
+    - name: Notify agent status
+      if: always()
+      run: |
+        echo "📢 Agent deployment status:"
+        echo "Agent Type: ${{ github.event.inputs.agent_type || 'all' }}"
+        echo "Deployment Strategy: ${{ github.event.inputs.deployment_strategy || 'blue-green' }}"
+        echo "Status: ${{ job.status }}"
+        echo "Timestamp: $(date)"
+
+
+
+

@@ -1,0 +1,66 @@
+# Docker Compose for CI/CD Testing
+# Simplified version for running tests in CI environment
+
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./symphainy-platform
+      dockerfile: Dockerfile.ci
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=ci
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./test.db}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - symphainy-ci
+
+  frontend:
+    build:
+      context: ./symphainy-frontend
+      dockerfile: Dockerfile.ci
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NODE_ENV=test
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - symphainy-ci
+
+  e2e-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    environment:
+      - TEST_FRONTEND_URL=http://frontend:3000
+      - TEST_BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+      - frontend
+    volumes:
+      - ./tests/screenshots:/app/tests/screenshots
+    networks:
+      - symphainy-ci
+    command: >
+      sh -c "
+        sleep 10 &&
+        pytest tests/e2e/ -v -s --timeout=300
+      "
+
+networks:
+  symphainy-ci:
+    driver: bridge
+
+
+
+

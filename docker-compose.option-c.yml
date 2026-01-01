@@ -1,0 +1,365 @@
+# Docker Compose for Option C: Fully Hosted "Everything as a Service"
+# 
+# This compose file implements the Option C pattern from hybridcloudstrategy.md:
+# - Infrastructure services replaced with managed services (MemoryStore, ArangoDB Oasis, etc.)
+# - Application containers (Backend, Frontend, Celery) remain containerized
+# - Proves viability of Option C pattern on GCS VM
+#
+# Usage:
+#   Start: docker-compose -f docker-compose.option-c.yml --env-file .env.production up -d
+#   Stop: docker-compose -f docker-compose.option-c.yml down
+#
+# Prerequisites:
+#   - Managed services configured and accessible
+#   - Environment variables set for managed service URLs
+#   - OPTION_C_ENABLED=true in environment file
+
+services:
+  # ============================================================================
+  # INFRASTRUCTURE SERVICES (MINIMAL - Only Traefik for routing)
+  # ============================================================================
+  
+  # Traefik - Reverse Proxy and Load Balancer (REQUIRED for routing)
+  traefik:
+    image: traefik:v3.0
+    container_name: symphainy-traefik
+    ports:
+      - "${TRAEFIK_HTTP_PORT:-80}:80"
+      - "${TRAEFIK_HTTPS_PORT:-443}:443"
+      - "${TRAEFIK_DASHBOARD_PORT:-8080}:8080"
+    command:
+      - --api.dashboard=${TRAEFIK_DASHBOARD_ENABLED:-false}
+      - --api.insecure=${TRAEFIK_DASHBOARD_ENABLED:-false}
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=${DOCKER_NETWORK_NAME:-smart_city_net}
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --log.level=INFO
+      - --accesslog=true
+      - --providers.docker.watch=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./symphainy-platform/traefik-config:/etc/traefik:ro
+    networks:
+      - smart_city_net
+    depends_on:
+      - consul
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--tries=1", "--no-verbose", "--timeout=5", "http://127.0.0.1:8080/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,infrastructure"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.localhost`) || PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=web"
+      - "traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080"
+
+  # Consul - Service Discovery (REQUIRED for platform coordination)
+  # Option C: Keep Consul for service discovery, but can be replaced with managed service discovery
+  consul:
+    image: hashicorp/consul:latest
+    container_name: symphainy-consul
+    ports:
+      - "${CONSUL_HTTP_PORT:-8500}:8500"
+      - "${CONSUL_DNS_PORT:-8600}:8600/udp"
+      - "${CONSUL_DNS_PORT:-8600}:8600/tcp"
+      - "8300:8300"
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+      - CONSUL_CLIENT_INTERFACE=eth0
+      - CONSUL_DATACENTER=${CONSUL_DATACENTER:-dc1}
+      - CONSUL_BOOTSTRAP_EXPECT=1
+      - CONSUL_ACL_ENABLED=false
+      - CONSUL_ENABLE_UI=true
+    volumes:
+      - consul_data:/consul/data
+      - consul_config:/consul/config
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    networks:
+      - smart_city_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.consul.rule=Host(`consul.localhost`) || PathPrefix(`/consul`)"
+      - "traefik.http.routers.consul.entrypoints=web"
+      - "traefik.http.services.consul.loadbalancer.server.port=8500"
+
+  # ============================================================================
+  # APPLICATION SERVICES (Containerized - Option C Pattern)
+  # ============================================================================
+
+  # Backend - Symphainy Platform API
+  backend:
+    build:
+      context: ./symphainy-platform
+      dockerfile: Dockerfile
+    container_name: symphainy-backend-prod
+    env_file:
+      - ./symphainy-platform/.env.secrets
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # CORS Configuration - use environment variables
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost}
+      - API_CORS_ORIGINS=${API_CORS_ORIGINS:-http://localhost}
+      # OpenTelemetry Configuration
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=symphainy-platform
+      - OTEL_EXPORTER_OTLP_INSECURE=${OTEL_EXPORTER_OTLP_INSECURE:-false}
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=symphainy-platform
+      # Traefik Configuration
+      - TRAEFIK_API_URL=http://traefik:8080
+      # Option C: Use managed service URLs instead of container names
+      - REDIS_URL=${REDIS_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}}
+      - ARANGO_URL=${ARANGO_URL:-http://${ARANGO_HOST:-arangodb}:${ARANGO_PORT:-8529}}
+      - ARANGO_DB=${ARANGO_DB:-symphainy_metadata}
+      - ARANGO_USER=${ARANGO_USER:-root}
+      - ARANGO_PASS=${ARANGO_PASS:-}
+      # Supabase Configuration loaded from .env.secrets
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,environment"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - smart_city_net
+    depends_on:
+      traefik:
+        condition: service_started
+      consul:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend-auth.rule=PathPrefix(`/api/auth`) || Path(`/api/health`) || Path(`/api/v1/session/create-user-session`)"
+      - "traefik.http.routers.backend-auth.entrypoints=web"
+      - "traefik.http.routers.backend-auth.service=backend"
+      - "traefik.http.routers.backend-auth.middlewares=backend-chain@file"
+      - "traefik.http.routers.backend-auth.priority=100"
+      - "traefik.http.routers.backend-websocket.rule=PathPrefix(`/api/ws`)"
+      - "traefik.http.routers.backend-websocket.entrypoints=web"
+      - "traefik.http.routers.backend-websocket.service=backend"
+      - "traefik.http.routers.backend-websocket.middlewares=websocket-chain@file"
+      - "traefik.http.routers.backend-websocket.priority=95"
+      - "traefik.http.routers.backend-upload.rule=PathPrefix(`/api/v1/content-pillar/upload-file`)"
+      - "traefik.http.routers.backend-upload.entrypoints=web"
+      - "traefik.http.routers.backend-upload.service=backend"
+      - "traefik.http.routers.backend-upload.middlewares=backend-chain@file"
+      - "traefik.http.routers.backend-upload.priority=90"
+      - "traefik.http.routers.backend-process-file.rule=PathPrefix(`/api/v1/content-pillar/process-file`)"
+      - "traefik.http.routers.backend-process-file.entrypoints=web"
+      - "traefik.http.routers.backend-process-file.service=backend"
+      - "traefik.http.routers.backend-process-file.middlewares=backend-chain@file"
+      - "traefik.http.routers.backend-process-file.priority=89"
+      - "traefik.http.routers.backend.rule=(Host(`api.localhost`) || PathPrefix(`/api`)) && !PathPrefix(`/api/v1/content-pillar/upload-file`) && !PathPrefix(`/api/v1/content-pillar/process-file`) && !PathPrefix(`/api/ws`) && !Path(`/api/v1/session/create-user-session`)"
+      - "traefik.http.routers.backend.entrypoints=web"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+      - "traefik.http.routers.backend.middlewares=backend-chain-with-auth@file"
+      - "traefik.http.routers.backend.priority=1"
+
+  # Frontend - Symphainy Platform UI
+  frontend:
+    build:
+      context: ./symphainy-frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-${API_URL:-http://localhost}}
+        - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-${API_URL:-http://localhost}}
+        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-${API_URL:-http://localhost}}
+    container_name: symphainy-frontend-prod
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-${API_URL:-http://localhost}}
+      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-${API_URL:-http://localhost}}
+      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-${API_URL:-http://localhost}}
+      - NEXT_PUBLIC_FRONTEND_URL=${NEXT_PUBLIC_FRONTEND_URL:-${FRONTEND_URL:-http://localhost}}
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1.5G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,environment"
+    depends_on:
+      backend:
+        condition: service_healthy
+      traefik:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - smart_city_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=(Host(`localhost`) || HostRegexp(`{host:.*}`)) && !PathPrefix(`/api`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      - "traefik.http.routers.frontend.middlewares=frontend-chain@file"
+      - "traefik.http.routers.frontend.priority=1"
+
+  # Celery Worker - Background Task Processing
+  celery-worker:
+    build:
+      context: ./symphainy-platform
+      dockerfile: Dockerfile
+    container_name: symphainy-celery-worker
+    command: celery -A celery_app worker --loglevel=info --concurrency=4
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    env_file:
+      - ./symphainy-platform/.env.secrets
+    environment:
+      # Option C: Use managed service URLs
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/1}
+      - ARANGO_URL=${ARANGO_URL:-http://${ARANGO_HOST:-arangodb}:${ARANGO_PORT:-8529}}
+      - ARANGO_DB=${ARANGO_DB:-symphainy_metadata}
+      - ARANGO_USER=${ARANGO_USER:-root}
+      - ARANGO_PASS=${ARANGO_PASS:-}
+      - REDIS_URL=${REDIS_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-smart-city-platform}
+    depends_on:
+      consul:
+        condition: service_healthy
+    networks:
+      - smart_city_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Celery Beat - Task Scheduler
+  celery-beat:
+    build:
+      context: ./symphainy-platform
+      dockerfile: Dockerfile
+    container_name: symphainy-celery-beat
+    working_dir: /app
+    command: sh -c "cd /app && celery -A celery_app beat --loglevel=info"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    env_file:
+      - ./symphainy-platform/.env.secrets
+    environment:
+      # Option C: Use managed service URLs
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/1}
+      - ARANGO_URL=${ARANGO_URL:-http://${ARANGO_HOST:-arangodb}:${ARANGO_PORT:-8529}}
+      - ARANGO_DB=${ARANGO_DB:-symphainy_metadata}
+      - ARANGO_USER=${ARANGO_USER:-root}
+      - ARANGO_PASS=${ARANGO_PASS:-}
+      - REDIS_URL=${REDIS_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-smart-city-platform}
+    depends_on:
+      consul:
+        condition: service_healthy
+    networks:
+      - smart_city_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+
+volumes:
+  consul_data:
+  consul_config:
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+
+networks:
+  smart_city_net:
+    name: ${DOCKER_NETWORK_NAME:-smart_city_net}
+    driver: bridge
+

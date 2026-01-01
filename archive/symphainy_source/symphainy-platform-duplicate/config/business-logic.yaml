@@ -1,0 +1,164 @@
+# Business Logic Configuration - Layer 3
+# Business rules, governance policies, and domain-specific settings
+
+# LLM Governance and Cost Management
+llm_governance:
+  rate_limiting:
+    enabled: true
+    requests_per_hour: 1000
+    requests_per_day: 10000
+    burst_limit: 100
+  
+  cost_management:
+    enabled: true
+    max_daily_cost: 100.0
+    max_monthly_cost: 3000.0
+    cost_alerts:
+      - threshold: 50.0
+        action: "warn"
+      - threshold: 80.0
+        action: "throttle"
+      - threshold: 95.0
+        action: "block"
+  
+  model_usage_policies:
+    default_model: "gpt-3.5-turbo"
+    premium_model: "gpt-4"
+    premium_threshold: 0.8
+    fallback_model: "gpt-3.5-turbo"
+  
+  audit_logging:
+    enabled: true
+    log_all_requests: true
+    log_response_content: false
+    retention_days: 90
+
+# Multi-tenancy Configuration
+multi_tenancy:
+  enabled: true
+  tenant_types:
+    individual:
+      max_tenants: 1
+      max_users: 5
+      max_storage_gb: 10
+      max_api_calls_per_day: 1000
+    
+    enterprise:
+      max_tenants: 100
+      max_users: 1000
+      max_storage_gb: 1000
+      max_api_calls_per_day: 100000
+    
+    enterprise_plus:
+      max_tenants: 1000
+      max_users: 10000
+      max_storage_gb: 10000
+      max_api_calls_per_day: 1000000
+  
+  isolation_policies:
+    data_isolation: "strict"
+    compute_isolation: "strict"
+    network_isolation: "moderate"
+    audit_isolation: "strict"
+
+# Business Enablement Pillars Configuration
+business_enablement:
+  content_pillar:
+    max_file_size_mb: 100
+    allowed_file_types: ["pdf", "docx", "txt", "csv", "json", "xml"]
+    processing_timeout_seconds: 300
+    max_concurrent_uploads: 10
+  
+  insights_pillar:
+    max_analysis_requests_per_hour: 100
+    analysis_timeout_seconds: 600
+    max_data_points: 1000000
+    cache_results_hours: 24
+  
+  operations_pillar:
+    max_workflow_steps: 50
+    workflow_timeout_seconds: 1800
+    max_concurrent_workflows: 20
+    retry_attempts: 3
+  
+  business_outcomes_pillar:
+    max_metrics_per_dashboard: 100
+    dashboard_refresh_interval_seconds: 300
+    max_concurrent_dashboards: 10
+    data_retention_days: 365
+
+# Smart City Infrastructure Configuration
+smart_city:
+  service_discovery:
+    enabled: true
+    refresh_interval_seconds: 30
+    health_check_interval_seconds: 60
+    max_retry_attempts: 3
+  
+  traffic_management:
+    max_concurrent_requests: 1000
+    request_timeout_seconds: 30
+    queue_size: 10000
+    priority_levels: 5
+  
+  security_policies:
+    authentication_required: true
+    authorization_required: true
+    rate_limiting_enabled: true
+    audit_logging_enabled: true
+
+# Agent Configuration
+agents:
+  global_agents:
+    max_concurrent_sessions: 100
+    session_timeout_minutes: 60
+    max_context_tokens: 8000
+    response_timeout_seconds: 30
+  
+  dimension_agents:
+    max_concurrent_sessions: 50
+    session_timeout_minutes: 30
+    max_context_tokens: 4000
+    response_timeout_seconds: 20
+  
+  simple_agents:
+    max_concurrent_sessions: 200
+    session_timeout_minutes: 10
+    max_context_tokens: 1000
+    response_timeout_seconds: 10
+
+# Journey Management Configuration
+journey_management:
+  max_journey_steps: 20
+  journey_timeout_minutes: 120
+  max_concurrent_journeys: 50
+  journey_persistence_days: 30
+  
+  business_outcome_analysis:
+    max_analysis_depth: 5
+    analysis_timeout_seconds: 300
+    max_questions_per_session: 10
+    context_retention_hours: 24
+
+# Platform Limits and Quotas
+platform_limits:
+  max_users_per_tenant: 10000
+  max_tenants_per_platform: 100000
+  max_storage_per_tenant_gb: 1000
+  max_api_calls_per_tenant_per_day: 1000000
+  
+  resource_limits:
+    cpu_cores_per_tenant: 4
+    memory_gb_per_tenant: 16
+    disk_gb_per_tenant: 1000
+    network_bandwidth_mbps: 1000
+
+# Feature Flags
+feature_flags:
+  journey_management_enabled: true
+  cross_dimensional_orchestration_enabled: true
+  advanced_analytics_enabled: true
+  real_time_monitoring_enabled: true
+  automated_scaling_enabled: false
+  ai_powered_insights_enabled: true
+  predictive_analytics_enabled: false

@@ -1,0 +1,14 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting pydantic-settings==2.5.2
+  Downloading pydantic_settings-2.5.2-py3-none-any.whl.metadata (3.5 kB)
+Requirement already satisfied: pydantic in /home/founders/.local/lib/python3.10/site-packages (2.11.7)
+Requirement already satisfied: python-dotenv>=0.21.0 in /home/founders/.local/lib/python3.10/site-packages (from pydantic-settings==2.5.2) (1.0.1)
+Requirement already satisfied: annotated-types>=0.6.0 in /home/founders/.local/lib/python3.10/site-packages (from pydantic) (0.7.0)
+Requirement already satisfied: pydantic-core==2.33.2 in /home/founders/.local/lib/python3.10/site-packages (from pydantic) (2.33.2)
+Requirement already satisfied: typing-extensions>=4.12.2 in /home/founders/.local/lib/python3.10/site-packages (from pydantic) (4.14.1)
+Requirement already satisfied: typing-inspection>=0.4.0 in /home/founders/.local/lib/python3.10/site-packages (from pydantic) (0.4.1)
+Downloading pydantic_settings-2.5.2-py3-none-any.whl (26 kB)
+Would install pydantic-settings-2.5.2
+
+[notice] A new release of pip is available: 25.2 -> 25.3
+[notice] To update, run: python3 -m pip install --upgrade pip

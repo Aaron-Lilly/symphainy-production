@@ -1,0 +1,85 @@
+# Docker Compose configuration for test environment
+# Provides isolated infrastructure services for testing
+
+version: '3.8'
+
+services:
+  # ArangoDB - Test Database
+  arangodb-test:
+    image: arangodb:latest
+    container_name: symphainy-arangodb-test
+    ports:
+      - "8529:8529"
+    environment:
+      - ARANGO_ROOT_PASSWORD=
+    volumes:
+      - arangodb_test_data:/var/lib/arangodb3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8529/_api/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_net
+
+  # Redis - Test Cache & Message Broker
+  redis-test:
+    image: redis:7-alpine
+    container_name: symphainy-redis-test
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_net
+
+  # Consul - Test Service Discovery
+  consul-test:
+    image: hashicorp/consul:latest
+    container_name: symphainy-consul-test
+    ports:
+      - "8500:8500"
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+      - CONSUL_CLIENT_INTERFACE=eth0
+      - CONSUL_DATACENTER=test-dc
+      - CONSUL_BOOTSTRAP_EXPECT=1
+      - CONSUL_ACL_ENABLED=false
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_net
+
+  # Meilisearch - Test Search Engine
+  meilisearch-test:
+    image: getmeili/meilisearch:latest
+    container_name: symphainy-meilisearch-test
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_MASTER_KEY=test_master_key
+      - MEILI_ENV=development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_net
+
+volumes:
+  arangodb_test_data:
+
+networks:
+  test_net:
+    driver: bridge
+
+
+

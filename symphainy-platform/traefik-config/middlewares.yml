@@ -1,0 +1,153 @@
+# Traefik Middleware Configuration
+# Dynamic middleware definitions for rate limiting, CORS, compression, and authentication
+
+http:
+  middlewares:
+    # Rate Limiting Middleware
+    rate-limit:
+      rateLimit:
+        average: 100        # Average requests per second
+        period: 1s          # Time period
+        burst: 50            # Burst allowance
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+
+    # CORS Middleware
+    cors-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - PATCH
+          - OPTIONS
+        accessControlAllowOriginList:
+          - "http://localhost"      # Local development
+          - "http://35.215.64.103"   # Production IP
+        accessControlAllowHeaders:
+          - "*"
+        accessControlExposeHeaders:
+          - Content-Length
+          - Content-Type
+          - Authorization
+        accessControlMaxAge: 3600
+        addVaryHeader: true
+
+    # Compression Middleware
+    compression:
+      compress: {}
+
+    # Authentication Middleware (Basic Auth for dashboard - replace with JWT in production)
+    dashboard-auth:
+      basicAuth:
+        users:
+          - "admin:$2y$10$..."  # Placeholder - replace with actual hash
+        realm: "Traefik Dashboard"
+        removeHeader: true
+
+    # Security Headers Middleware
+    security-headers:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+        customResponseHeaders:
+          X-Content-Type-Options: "nosniff"
+          X-Frame-Options: "DENY"
+          X-XSS-Protection: "1; mode=block"
+          Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+          Referrer-Policy: "strict-origin-when-cross-origin"
+
+    # Combined Middleware Chain for Backend API
+    # Note: Backend routers have /api prefix, so we don't strip it
+    backend-chain:
+      chain:
+        middlewares:
+          - rate-limit
+          - cors-headers
+          - compression
+          - security-headers
+
+    # Combined Middleware Chain for Frontend
+    frontend-chain:
+      chain:
+        middlewares:
+          - cors-headers
+          - compression
+          - security-headers
+
+    # Supabase JWT Validation Middleware (ForwardAuth)
+    # Note: ForwardAuth doesn't read request body, only headers
+    # For file uploads, token validation happens via Authorization header only
+    supabase-auth:
+      forwardAuth:
+        address: "http://backend:8000/api/auth/validate-token"
+        authResponseHeaders:
+          - "X-User-Id"
+          - "X-Tenant-Id"
+          - "X-User-Email"
+          - "X-User-Roles"
+          - "X-User-Permissions"
+          - "X-Auth-Origin"
+        trustForwardHeader: true
+        authResponseHeadersRegex: "^X-.*"
+        # Add timeout for ForwardAuth requests - should be fast (JWKS validation)
+        # If ForwardAuth takes longer than 10 seconds, something is wrong
+        authRequestHeaders:
+          - "Authorization"
+        # Note: ForwardAuth timeout is controlled by Traefik's entryPoint timeouts
+        # But we can add a circuit breaker by ensuring the endpoint responds quickly
+
+    # Combined Middleware Chain for Backend API with Auth
+    # Note: Backend routers have /api prefix, so we don't strip it
+    # ForwardAuth (supabase-auth) already sets X-User-Id and X-Tenant-Id headers
+    # No need for tenant-context middleware (template variables don't work in customRequestHeaders)
+    backend-chain-with-auth:
+      chain:
+        middlewares:
+          - supabase-auth  # Sets X-User-Id, X-Tenant-Id from ForwardAuth response
+          - rate-limit
+          - cors-headers
+          - compression
+          - security-headers
+
+    # WebSocket CORS Middleware
+    # Handles CORS for WebSocket upgrade requests
+    websocket-cors:
+      headers:
+        accessControlAllowOriginList:
+          - "http://localhost"
+          - "http://35.215.64.103"
+        accessControlAllowMethods:
+          - GET
+          - OPTIONS
+        accessControlAllowHeaders:
+          - "*"
+        accessControlExposeHeaders:
+          - Content-Length
+          - Content-Type
+          - Authorization
+        accessControlMaxAge: 3600
+        addVaryHeader: true
+
+    # WebSocket Rate Limiting (lower than HTTP)
+    websocket-rate-limit:
+      rateLimit:
+        average: 10        # Lower rate for WebSocket connections
+        period: 1s
+        burst: 5
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+
+    # Combined Middleware Chain for WebSocket
+    # Note: WebSocket routes bypass ForwardAuth (handler-level auth via session_token query param)
+    websocket-chain:
+      chain:
+        middlewares:
+          - websocket-cors
+          - websocket-rate-limit
+          - security-headers
+
+

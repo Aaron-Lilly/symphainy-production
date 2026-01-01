@@ -1,0 +1,479 @@
+# Complete Infrastructure Stack for Symphainy Platform
+# Includes: ArangoDB, Redis, Consul, Meilisearch, Tempo, OpenTelemetry Collector, Celery
+
+services:
+  # ArangoDB - Graph Database for Metadata and Telemetry
+  arangodb:
+    image: arangodb:3.11
+    container_name: symphainy-arangodb
+    ports:
+      - "8529:8529"
+    environment:
+      - ARANGO_ROOT_PASSWORD=${ARANGO_PASS:-}
+      - ARANGO_NO_AUTH=1
+    volumes:
+      - arangodb_data:/var/lib/arangodb3
+      - ./arangodb-init:/docker-entrypoint-initdb.d:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,infrastructure"
+    networks:
+      - smart_city_net
+    healthcheck:
+      # Use wget with quiet flag (Alpine-based ArangoDB image includes wget, not curl)
+      # --spider: Don't download, just check if URL exists
+      # -q: Quiet mode (suppress output)
+      # -O /dev/null: Discard output (some wget versions require output destination)
+      test: ["CMD", "wget", "--spider", "-q", "-O", "/dev/null", "http://127.0.0.1:8529/_api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.arangodb.rule=Host(`arangodb.localhost`) || PathPrefix(`/arangodb`)"
+      - "traefik.http.routers.arangodb.entrypoints=web"
+      - "traefik.http.services.arangodb.loadbalancer.server.port=8529"
+
+  # Redis with Graph Module - Cache, Message Broker, and Graph Database (includes RedisGraph)
+  redis:
+    image: redislabs/redisgraph:latest
+    container_name: symphainy-redis
+    ports:
+      - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,infrastructure"
+    networks:
+      - smart_city_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=false"  # Redis is TCP, not HTTP - not exposed via Traefik
+
+  # Meilisearch - Search Engine for Knowledge Discovery
+  meilisearch:
+    image: getmeili/meilisearch:v1.5
+    container_name: symphainy-meilisearch
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_ENV=development
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-masterKey}
+      - MEILI_NO_ANALYTICS=true
+      - MEILI_HTTP_ADDR=0.0.0.0:7700
+    volumes:
+      - meilisearch_data:/meili_data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.meilisearch.rule=Host(`meilisearch.localhost`) || PathPrefix(`/meilisearch`)"
+      - "traefik.http.routers.meilisearch.entrypoints=web"
+      - "traefik.http.services.meilisearch.loadbalancer.server.port=7700"
+
+  # Traefik - Reverse Proxy and Load Balancer
+  traefik:
+    image: traefik:v3.0
+    container_name: symphainy-traefik
+    ports:
+      - "80:80"      # HTTP - Main entry point for all services
+      - "443:443"    # HTTPS (future)
+      - "8080:8080"  # Traefik Dashboard
+    command:
+      - --api.dashboard=true
+      - --api.insecure=true  # Secure in production
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=symphainy-platform_smart_city_net
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --log.level=INFO
+      - --accesslog=true
+      - --providers.docker.watch=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik-config:/etc/traefik:ro
+    networks:
+      - smart_city_net
+    depends_on:
+      - consul
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "-O", "/dev/null", "http://localhost:8080/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,infrastructure"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.localhost`) || PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=web"
+      - "traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080"
+
+  # Consul - Service Discovery and KV Store
+  consul:
+    image: hashicorp/consul:latest
+    container_name: symphainy-consul
+    ports:
+      - "8500:8500"  # Standard Consul HTTP API port
+      - "8600:8600/udp"  # Consul DNS
+      - "8600:8600/tcp"  # Consul DNS
+      - "8300:8300"  # Consul server RPC
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+      - CONSUL_CLIENT_INTERFACE=eth0
+      - CONSUL_DATACENTER=${CONSUL_DATACENTER:-dc1}
+      - CONSUL_BOOTSTRAP_EXPECT=1
+      - CONSUL_ACL_ENABLED=false
+      - CONSUL_ENABLE_UI=true
+    volumes:
+      - consul_data:/consul/data
+      - consul_config:/consul/config
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    networks:
+      - smart_city_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.consul.rule=Host(`consul.localhost`) || PathPrefix(`/consul`)"
+      - "traefik.http.routers.consul.entrypoints=web"
+      - "traefik.http.services.consul.loadbalancer.server.port=8500"
+
+  # Tempo - Distributed Tracing Backend
+  tempo:
+    image: grafana/tempo:latest
+    container_name: symphainy-tempo
+    ports:
+      - "3200:3200"   # Tempo UI
+      - "4319:4317"   # OTLP gRPC (internal port 4317, external 4319)
+      - "4320:4318"   # OTLP HTTP (internal port 4318, external 4320)
+    volumes:
+      - ./tempo-config.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    command: -config.file=/etc/tempo.yaml
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    depends_on:
+      - consul
+    healthcheck:
+      # Use wget (Alpine-based Tempo image includes wget via busybox, not curl)
+      test: ["CMD", "wget", "--spider", "-q", "-O", "/dev/null", "http://localhost:3200/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: symphainy-otel-collector
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8890"   # Prometheus metrics (external port 8889, internal port 8890)
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,infrastructure"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    depends_on:
+      tempo:
+        condition: service_started
+    # Note: OTel collector image doesn't include curl/wget, so we rely on service_started
+    # The collector logs show "Everything is ready" when it's healthy
+    restart: unless-stopped
+
+  # Celery Worker - Background Task Processing
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: symphainy-celery-worker
+    command: celery -A celery_app worker --loglevel=info --concurrency=4
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      - ARANGO_URL=${ARANGO_URL:-http://arangodb:8529}
+      - ARANGO_DB=${ARANGO_DB:-symphainy_metadata}
+      - ARANGO_USER=${ARANGO_USER:-root}
+      - ARANGO_PASS=${ARANGO_PASS:-}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-smart-city-platform}
+    depends_on:
+      redis:
+        condition: service_healthy
+      arangodb:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - smart_city_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Celery Beat - Task Scheduler
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: symphainy-celery-beat
+    working_dir: /app
+    command: sh -c "cd /app && celery -A celery_app beat --loglevel=info"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      - ARANGO_URL=${ARANGO_URL:-http://arangodb:8529}
+      - ARANGO_DB=${ARANGO_DB:-symphainy_metadata}
+      - ARANGO_USER=${ARANGO_USER:-root}
+      - ARANGO_PASS=${ARANGO_PASS:-}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-smart-city-platform}
+    depends_on:
+      redis:
+        condition: service_healthy
+      arangodb:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - smart_city_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Grafana - Visualization and Monitoring
+  grafana:
+    image: grafana/grafana:latest
+    container_name: symphainy-grafana
+    ports:
+      - "3100:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # - GF_INSTALL_PLUGINS=grafana-tempo-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    depends_on:
+      tempo:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.localhost`) || PathPrefix(`/grafana`)"
+      - "traefik.http.routers.grafana.entrypoints=web"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  # Loki - Log Aggregation Backend
+  loki:
+    image: grafana/loki:latest
+    container_name: symphainy-loki
+    ports:
+      - "3101:3100"  # External 3101, internal 3100 (Grafana uses 3100 externally)
+    volumes:
+      - loki_data:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    healthcheck:
+      # Loki doesn't include wget/curl, so we use the Loki binary itself
+      test: ["CMD-SHELL", "loki --version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # OPA (Open Policy Agent) - Policy Engine
+  # CURRENT (EC2): Running locally in Docker
+  # OPTION C: Replace with managed OPA service
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: symphainy-opa
+    ports:
+      - "8181:8181"
+    command: run --server --log-level info
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    networks:
+      - smart_city_net
+    # OPA distroless image doesn't include curl/wget
+    # Health check removed - rely on depends_on and container status
+    # OPA will be marked as started when container is running
+    # Alternative: Use OPA binary for health check if needed: /opa eval -i http://localhost:8181/health true
+    restart: unless-stopped
+
+volumes:
+  arangodb_data:
+  redis_data:
+  meilisearch_data:
+  consul_data:
+  consul_config:
+  tempo_data:
+  grafana_data:
+  loki_data:
+  otel_collector_logs:
+
+networks:
+  smart_city_net:
+    driver: bridge

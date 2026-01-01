@@ -1,0 +1,38 @@
+# Cursor Ignore - Reduce Token Costs
+# Exclude test artifacts from Cursor context while keeping test source files editable
+
+# IMPORTANT: Test source files (*.py) are explicitly NOT excluded - they remain editable
+# Only test artifacts (logs, cache, coverage reports) are excluded
+
+# Test artifacts (exclude from context to reduce token costs)
+tests/logs/
+tests/screenshots/
+tests/**/__pycache__/
+tests/**/.pytest_cache/
+tests/**/htmlcov/
+tests/**/.coverage
+tests/**/test-results/
+tests/**/coverage/
+# Exclude test data files (JSON/XML) but NOT test source files
+tests/**/*.json
+tests/**/*.xml
+# But explicitly allow test source files
+!tests/**/*.py
+
+# Python artifacts (exclude)
+*.pyc
+__pycache__/
+.pytest_cache/
+htmlcov/
+.coverage
+*.log
+
+# Archive and old code
+archive/
+*_old.py
+*_backup.py
+
+# Documentation (exclude from context, but can be edited when needed)
+docs/11-12/TEST_*.md
+docs/*/TEST_*.md
+

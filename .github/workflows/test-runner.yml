@@ -1,0 +1,100 @@
+# Separate workflow for Team B to run just the E2E tests
+# Can be triggered manually or on schedule
+
+name: E2E Test Runner
+
+on:
+  workflow_dispatch:  # Manual trigger
+    inputs:
+      test_suite:
+        description: 'Which test suite to run'
+        required: true
+        default: 'critical'
+        type: choice
+        options:
+          - critical  # 6 critical tests only
+          - full      # All E2E tests
+          - single    # Single test (specify below)
+      specific_test:
+        description: 'Specific test file (if single selected)'
+        required: false
+        default: 'test_complete_cto_demo_journey.py'
+  
+  schedule:
+    # Run every day at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  PYTHON_VERSION: '3.10'
+  NODE_VERSION: '18'
+
+jobs:
+  run-e2e-tests:
+    name: Run E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-asyncio pytest-timeout playwright
+          playwright install chromium
+          playwright install-deps
+          cd symphainy-platform && pip install -r requirements.txt || true
+          cd ../symphainy-frontend && npm ci
+      
+      - name: Start services
+        run: |
+          cd symphainy-platform && python3 main.py &
+          cd symphainy-frontend && npm run dev &
+          sleep 15
+      
+      - name: Run Critical Tests (6 tests)
+        if: github.event.inputs.test_suite == 'critical' || github.event_name == 'schedule'
+        working-directory: tests
+        run: |
+          pytest e2e/test_complete_cto_demo_journey.py \
+                 e2e/test_persistent_ui.py \
+                 e2e/test_content_pillar_smoke.py \
+                 e2e/test_insights_pillar_smoke.py \
+                 e2e/test_operations_pillar_smoke.py \
+                 e2e/test_business_outcomes_pillar_smoke.py \
+                 -v -s --timeout=300
+      
+      - name: Run Full Test Suite
+        if: github.event.inputs.test_suite == 'full'
+        working-directory: tests
+        run: |
+          pytest e2e/ -v -s --timeout=300
+      
+      - name: Run Single Test
+        if: github.event.inputs.test_suite == 'single'
+        working-directory: tests
+        run: |
+          pytest e2e/${{ github.event.inputs.specific_test }} -v -s --timeout=300
+      
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-test-results-${{ github.run_number }}
+          path: |
+            tests/screenshots/
+            tests/*.xml
+
+
+
+

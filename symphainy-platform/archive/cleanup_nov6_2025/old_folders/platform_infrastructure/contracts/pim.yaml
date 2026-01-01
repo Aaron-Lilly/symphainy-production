@@ -1,0 +1,189 @@
+# Platform Interface Manifest (PIM) - Version 1.0
+# Single source of truth for all service interaction contracts
+# Based on ACTUAL platform implementations (not theoretical standards)
+
+version: 1.0
+description: "Platform Interface Manifest - Service Interaction Contracts (Based on Actual Implementations)"
+
+interfaces:
+  # Public Works Foundation - Infrastructure Abstractions (ACTUAL METHODS)
+  public_works:
+    auth:
+      get_auth_abstraction: 
+        input: None
+        output: AuthProtocol
+      get_authorization_abstraction:
+        input: None
+        output: AuthorizationProtocol
+      get_session_abstraction:
+        input: None
+        output: SessionProtocol
+      get_tenant_abstraction:
+        input: None
+        output: TenantProtocol
+    
+    file_management:
+      get_file_management_abstraction:
+        input: None
+        output: FileManagementAbstraction
+      get_file_management_composition:
+        input: None
+        output: FileManagementCompositionService
+    
+    policy:
+      get_policy_engine:
+        input: {engine_name: str}
+        output: PolicyEngine
+    
+    config:
+      get_config_adapter:
+        input: None
+        output: ConfigAdapter
+
+  # Smart City Foundation Gateway - Platform Capabilities (ACTUAL METHODS)
+  smartcity:
+    foundation_gateway:
+      get_abstraction:
+        input: {name: str}
+        output: Any
+      get_role_api:
+        input: {role_name: str}
+        output: Any
+      get_communication_gateway:
+        input: None
+        output: PostOfficeService
+    
+    # Smart City Roles (ACTUAL SERVICE NAMES)
+    librarian:
+      search_docs:
+        input: SearchQuery
+        output: SearchResult
+      index_content:
+        input: IndexRequest
+        output: IndexResult
+    
+    data_steward:
+      validate_data:
+        input: DataValidationRequest
+        output: DataValidationResult
+      transform_data:
+        input: DataTransformRequest
+        output: DataTransformResult
+    
+    security_guard:
+      authenticate:
+        input: AuthRequest
+        output: AuthResult
+      authorize:
+        input: AuthorizationRequest
+        output: AuthorizationResult
+    
+    post_office:
+      send_message:
+        input: SendMessageRequest
+        output: SendMessageResponse
+      route_event:
+        input: RouteEventRequest
+        output: RouteEventResponse
+
+  # Communication Foundation - Cross-Realm Communication (ACTUAL METHODS)
+  communication:
+    send_message:
+      input: {target_realm: str, message_type: str, message_data: Dict[str, Any]}
+      output: CommunicationContext
+    publish_event:
+      input: {event_type: str, event_data: Dict[str, Any]}
+      output: CommunicationContext
+
+  # Curator Foundation - Service Discovery (ACTUAL METHODS)
+  curator:
+    register_service:
+      input: {service_instance: Any, service_metadata: Dict[str, Any]}
+      output: Dict[str, Any]
+    discover_services:
+      input: {service_name: str}
+      output: List[ServiceRegistration]
+
+  # DI Container - Service Management (ACTUAL METHODS)
+  di_container:
+    get_foundation_service:
+      input: {service_name: str}
+      output: Optional[Any]
+    get_logger:
+      input: {service_name: str}
+      output: Logger
+    get_config:
+      input: None
+      output: ConfigManager
+    get_health:
+      input: None
+      output: HealthManagementUtility
+    get_telemetry:
+      input: None
+      output: TelemetryReportingUtility
+    get_security:
+      input: None
+      output: SecurityAuthorizationUtility
+    get_error_handler:
+      input: None
+      output: SmartCityErrorHandler
+    get_tenant:
+      input: None
+      output: TenantManagementUtility
+    get_validation:
+      input: None
+      output: ValidationUtility
+    get_serialization:
+      input: None
+      output: SerializationUtility
+
+# Data Types (ACTUAL TYPES FROM IMPLEMENTATIONS)
+types:
+  CommunicationContext:
+    communication_id: str
+    communication_type: CommunicationType
+    source_realm: str
+    target_realm: str
+    content: Dict[str, Any]
+    status: CommunicationStatus
+  
+  ServiceRegistration:
+    service_id: str
+    service_name: str
+    service_type: str
+    address: str
+    port: int
+    tags: List[str]
+    meta: Dict[str, Any]
+    registered_at: datetime
+    health_status: str
+    endpoints: List[str]
+    capabilities: List[str]
+  
+  SearchQuery:
+    query: str
+    filters: Dict[str, Any]
+    tenant_id: str
+  
+  SearchResult:
+    results: List[Dict[str, Any]]
+    total_count: int
+    query_time_ms: float
+
+# Access Policies (ACTUAL PATTERNS)
+access_policies:
+  smart_city_gateway_apis:
+    allowed_users: ["all_realms"]
+    description: "All realms can access Smart City Gateway APIs"
+  
+  direct_foundation_access:
+    allowed_users: ["agentic", "curator"]
+    description: "Only Agentic and Curator can access foundations directly"
+  
+  direct_infra_calls:
+    allowed_users: ["never"]
+    description: "Never call infrastructure directly - always through Public Works"
+  
+  cross_realm_communication:
+    allowed_users: ["all_realms"]
+    description: "All realms communicate via Communication Foundation"

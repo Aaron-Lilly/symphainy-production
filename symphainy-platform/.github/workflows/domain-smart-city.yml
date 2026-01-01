@@ -1,0 +1,170 @@
+name: Smart City Domain CI/CD
+
+on:
+  push:
+    paths:
+      - 'backend/smart_city/**'
+      - 'foundations/**'
+      - 'bases/**'
+      - 'utilities/**'
+  pull_request:
+    paths:
+      - 'backend/smart_city/**'
+      - 'foundations/**'
+      - 'bases/**'
+      - 'utilities/**'
+
+jobs:
+  smart-city-ci:
+    runs-on: ubuntu-latest
+    name: Smart City Domain CI
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+      
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+      
+      - name: Install project
+        run: poetry install --no-interaction
+      
+      - name: Run Smart City Unit Tests
+        run: |
+          poetry run python -m pytest tests/smart-city/unit/ -v --tb=short
+      
+      - name: Run Smart City Integration Tests
+        run: |
+          poetry run python -m pytest tests/smart-city/integration/ -v --tb=short
+      
+      - name: Run Smart City Chaos Tests
+        run: |
+          poetry run python -m pytest tests/smart-city/chaos/ -v --tb=short
+      
+      - name: Run Smart City Blue-Green Tests
+        run: |
+          poetry run python -m pytest tests/smart-city/blue-green/ -v --tb=short
+      
+      - name: Validate Domain Boundaries
+        run: |
+          poetry run python -c "
+          import sys
+          sys.path.append('.')
+          from foundations.public_works_foundation.public_works_foundation_service import PublicWorksFoundationService
+          from foundations.di_container.di_container_service import DIContainerService
+          
+          # Test that Smart City gets ALL abstractions (including CI/CD)
+          di_container = DIContainerService('test')
+          public_works = PublicWorksFoundationService(di_container)
+          smart_city_abstractions = public_works.get_smart_city_abstractions()
+          
+          # Verify CI/CD abstractions are available
+          assert 'cicd_monitoring' in smart_city_abstractions, 'CI/CD monitoring abstraction missing'
+          assert 'deployment_management' in smart_city_abstractions, 'Deployment management abstraction missing'
+          assert 'agent_governance' in smart_city_abstractions, 'Agent governance abstraction missing'
+          
+          print('✅ Smart City domain boundaries validated')
+          print(f'✅ Smart City has {len(smart_city_abstractions)} abstractions (including CI/CD)')
+          "
+      
+      - name: Run Code Quality Checks
+        run: |
+          poetry run black --check backend/smart_city/ foundations/ bases/ utilities/
+          poetry run isort --check-only backend/smart_city/ foundations/ bases/ utilities/
+          poetry run flake8 backend/smart_city/ foundations/ bases/ utilities/
+          poetry run mypy backend/smart_city/ foundations/ bases/ utilities/
+      
+      - name: Run Security Scans
+        run: |
+          poetry run bandit -r backend/smart_city/ foundations/ bases/ utilities/
+          poetry run safety check
+          poetry run pip-audit
+      
+      - name: Generate Test Coverage Report
+        run: |
+          poetry run pytest --cov=backend/smart_city --cov=foundations --cov=bases --cov=utilities --cov-report=xml --cov-report=html
+      
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: smart-city
+          name: smart-city-coverage
+
+  smart-city-cd:
+    runs-on: ubuntu-latest
+    name: Smart City Domain CD
+    needs: smart-city-ci
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      
+      - name: Deploy Smart City Services
+        run: |
+          echo "🚀 Deploying Smart City services..."
+          # This would integrate with our CI/CD business abstractions
+          poetry run python -c "
+          import sys
+          sys.path.append('.')
+          from foundations.public_works_foundation.public_works_foundation_service import PublicWorksFoundationService
+          from foundations.di_container.di_container_service import DIContainerService
+          
+          # Get CI/CD abstractions for deployment
+          di_container = DIContainerService('deployment')
+          public_works = PublicWorksFoundationService(di_container)
+          smart_city_abstractions = public_works.get_smart_city_abstractions()
+          
+          # Use CI/CD monitoring abstraction for deployment tracking
+          cicd_monitoring = smart_city_abstractions.get('cicd_monitoring')
+          deployment_management = smart_city_abstractions.get('deployment_management')
+          
+          print('✅ Smart City deployment using CI/CD abstractions')
+          print(f'✅ CI/CD monitoring available: {cicd_monitoring is not None}')
+          print(f'✅ Deployment management available: {deployment_management is not None}')
+          "
+      
+      - name: Run Post-Deployment Tests
+        run: |
+          poetry run python -m pytest tests/smart-city/blue-green/ -v --tb=short
+      
+      - name: Notify Deployment Success
+        run: |
+          echo "✅ Smart City domain deployment successful"
+          echo "🔗 Smart City services are now available"

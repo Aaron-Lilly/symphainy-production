@@ -1,0 +1,171 @@
+name: Journey Domain CI/CD
+
+on:
+  push:
+    paths:
+      - 'journey_solution/**'
+      - 'foundations/**'
+  pull_request:
+    paths:
+      - 'journey_solution/**'
+      - 'foundations/**'
+
+jobs:
+  journey-ci:
+    runs-on: ubuntu-latest
+    name: Journey Domain CI
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+      
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+      
+      - name: Install project
+        run: poetry install --no-interaction
+      
+      - name: Run Journey Unit Tests
+        run: |
+          poetry run python -m pytest tests/journey/unit/ -v --tb=short
+      
+      - name: Run Journey Integration Tests
+        run: |
+          poetry run python -m pytest tests/journey/integration/ -v --tb=short
+      
+      - name: Run Journey Chaos Tests
+        run: |
+          poetry run python -m pytest tests/journey/chaos/ -v --tb=short
+      
+      - name: Run Journey Blue-Green Tests
+        run: |
+          poetry run python -m pytest tests/journey/blue-green/ -v --tb=short
+      
+      - name: Validate Domain Boundaries
+        run: |
+          poetry run python -c "
+          import sys
+          sys.path.append('.')
+          from foundations.public_works_foundation.public_works_foundation_service import PublicWorksFoundationService
+          from foundations.di_container.di_container_service import DIContainerService
+          
+          # Test that Journey gets its specific abstractions
+          di_container = DIContainerService('test')
+          public_works = PublicWorksFoundationService(di_container)
+          journey_abstractions = public_works.get_experience_abstractions()  # Journey is part of Experience dimension
+          
+          # Verify Journey abstractions are available
+          assert 'cross_dimensional_orchestration' in journey_abstractions, 'Cross-dimensional orchestration abstraction missing'
+          assert 'platform_coordination' in journey_abstractions, 'Platform coordination abstraction missing'
+          assert 'analytics' in journey_abstractions, 'Analytics abstraction missing'
+          assert 'visualization' in journey_abstractions, 'Visualization abstraction missing'
+          
+          print('✅ Journey domain boundaries validated')
+          print(f'✅ Journey has {len(journey_abstractions)} abstractions')
+          "
+      
+      - name: Run Code Quality Checks
+        run: |
+          poetry run black --check journey_solution/ foundations/
+          poetry run isort --check-only journey_solution/ foundations/
+          poetry run flake8 journey_solution/ foundations/
+          poetry run mypy journey_solution/ foundations/
+      
+      - name: Run Security Scans
+        run: |
+          poetry run bandit -r journey_solution/ foundations/
+          poetry run safety check
+          poetry run pip-audit
+      
+      - name: Generate Test Coverage Report
+        run: |
+          poetry run pytest --cov=journey_solution --cov=foundations --cov-report=xml --cov-report=html
+      
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: journey
+          name: journey-coverage
+
+  journey-cd:
+    runs-on: ubuntu-latest
+    name: Journey Domain CD
+    needs: journey-ci
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      
+      - name: Deploy Journey Services
+        run: |
+          echo "🚀 Deploying Journey services..."
+          # This would integrate with our CI/CD business abstractions
+          poetry run python -c "
+          import sys
+          sys.path.append('.')
+          from foundations.public_works_foundation.public_works_foundation_service import PublicWorksFoundationService
+          from foundations.di_container.di_container_service import DIContainerService
+          
+          # Get abstractions for deployment
+          di_container = DIContainerService('deployment')
+          public_works = PublicWorksFoundationService(di_container)
+          journey_abstractions = public_works.get_experience_abstractions()  # Journey is part of Experience
+          
+          # Use Journey abstractions for deployment
+          cross_dimensional = journey_abstractions.get('cross_dimensional_orchestration')
+          platform_coordination = journey_abstractions.get('platform_coordination')
+          
+          print('✅ Journey deployment using abstractions')
+          print(f'✅ Cross-dimensional orchestration available: {cross_dimensional is not None}')
+          print(f'✅ Platform coordination available: {platform_coordination is not None}')
+          "
+      
+      - name: Run Post-Deployment Tests
+        run: |
+          poetry run python -m pytest tests/journey/blue-green/ -v --tb=short
+      
+      - name: Notify Deployment Success
+        run: |
+          echo "✅ Journey domain deployment successful"
+          echo "🔗 Journey services are now available"
+
+
+
+

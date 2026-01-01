@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""
+Solution Manager Service - Utilities Module
+
+Micro-module for utility methods.
+"""
+
+import logging
+from typing import Any, Dict
+
+
+class Utilities:
+    """Utilities module for Solution Manager service."""
+    
+    def __init__(self, service: Any):
+        """Initialize with service instance."""
+        self.service = service
+        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+    
+    def validate_infrastructure_mapping(self) -> Dict[str, Any]:
+        """Validate infrastructure abstractions are properly mapped."""
+        mapping_status = {
+            "session_abstraction": self.service.session_abstraction is not None,
+            "state_management_abstraction": self.service.state_management_abstraction is not None,
+            "messaging_abstraction": self.service.messaging_abstraction is not None,
+            "analytics_abstraction": self.service.analytics_abstraction is not None,  # Optional
+            "is_infrastructure_connected": self.service.is_infrastructure_connected
+        }
+        
+        return mapping_status
+    
+    def get_service_capabilities(self) -> Dict[str, Any]:
+        """Get Solution Manager service capabilities."""
+        return {
+            "service_name": self.service.service_name,
+            "realm": self.service.realm_name,
+            "manager_type": str(self.service.manager_type),
+            "capabilities": {
+                "solution_design": True,
+                "capability_composition": True,
+                "poc_generation": True,
+                "journey_orchestration": True,
+                "platform_governance": True
+            },
+            "solution_initiators": list(self.service.solution_initiators.keys()),
+            "infrastructure": self.validate_infrastructure_mapping(),
+            "soa_apis": list(self.service.soa_apis.keys()) if hasattr(self.service, 'soa_apis') else [],
+            "mcp_tools": list(self.service.mcp_tools.keys()) if hasattr(self.service, 'mcp_tools') else []
+        }
+
+
+
+
+
+

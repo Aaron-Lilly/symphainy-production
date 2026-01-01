@@ -1,0 +1,23 @@
+0. The unifying pattern (this keeps you sane)
+You are standardizing on:
+“Heavy, domain-specific, non-Python native logic ⇒ containerized serviceLightweight, CPU-cheap utilities ⇒ library (until proven otherwise)”
+This gives you:SwappabilityHorizontal scalingHybrid cloud safetyClean demosZero tight coupling
+So:CapabilityPatternCOBRIXContainerized serviceKreuzbergContainerized serviceTesseractLibrary now, container later if needed1. COBRIX container (binary / COBOL parsing)
+Goal
+Expose COBRIX as a stateless parsing service:POST /parse/cobol→ input: file + copybook + options→ output: JSONL (records + metadata)1.1 Directory structureservices/ cobrix-parser/ Dockerfile entrypoint.sh app/ parse.sh config/ default.conf1.2 Dockerfile (JVM + COBRIX)FROM eclipse-temurin:17-jreENV COBRIX_VERSION=2.8.0WORKDIR /opt/cobrixRUN curl -L https://github.com/AbsaOSS/cobrix/releases/download/v${COBRIX_VERSION}/cobrix-${COBRIX_VERSION}.jar \ -o cobrix.jarCOPY app/parse.sh /usr/local/bin/parse.shRUN chmod +x /usr/local/bin/parse.shENTRYPOINT ["/usr/local/bin/parse.sh"]1.3 parse.sh (stateless entrypoint)#!/bin/bashset -eINPUT_FILE=$1COPYBOOK=$2OUTPUT_DIR=/outputjava -jar /opt/cobrix/cobrix.jar \ --input-file "$INPUT_FILE" \ --copybook "$COPYBOOK" \ --schema-retention-policy keep_original \ --output-format json \ --output-dir "$OUTPUT_DIR" This intentionally avoids Spark Stateless Works in Cloud Run or GKE1.4 Expected I/O contract (important)
+InputBinary file (mounted or uploaded)Copybook (mounted or uploaded)
+Output{ "records": [...], "schema": {...}, "encoding": "EBCDIC", "confidence": 0.92}You will later wrap this in your Content Parsing Abstraction.1.5 DeploymentCloud Run (preferred for MVP)GKE if file sizes > 2GB or sustained throughput
+No state → Cloud Run is fineJVM ≠ stateful2. Kreuzberg container (PDF parsing)
+Goal
+Expose Kreuzberg as a layout-aware document parser:POST /parse/pdf→ input: pdf→ output: structured JSON + text blocks + tables2.1 Directory structureservices/ kreuzberg-parser/ Dockerfile app/ server.py2.2 Dockerfile (Python)FROM python:3.11-slimWORKDIR /appRUN apt-get update && apt-get install -y \ poppler-utils \ && rm -rf /var/lib/apt/lists/*RUN pip install kreuzberg fastapi uvicornCOPY app /appCMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]2.3 FastAPI wrapper (server.py)from fastapi import FastAPI, UploadFilefrom kreuzberg import extractapp = FastAPI()@app.post("/parse/pdf")async def parse_pdf(file: UploadFile): content = await file.read() result = extract(content) return { "text_blocks": result.text, "tables": result.tables, "metadata": result.metadata, "confidence": 0.85 } Deterministic Easy to swap later Explains layout (critical for demos)2.4 DeploymentCloud Run is perfectAdd optional OCR later via feature flag3. Tesseract — should it be a container?
+Short answer
+Not yet — but design it like it could be.
+You currently have:Poetry dependencyAdapter → abstraction pattern via Public Works
+That’s fine for now.When to containerize Tesseract
+Do it only if:OCR becomes high-volumeYou need GPUYou want consistent language packs across environmentsYou want to swap OCR engines easilyIf you do containerize laterFROM ubuntu:22.04RUN apt-get update && apt-get install -y \ tesseract-ocr \ tesseract-ocr-eng \ python3 python3-pipRUN pip install pytesseract fastapi uvicorn pillowCOPY app /appWORKDIR /appCMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]But again — do not do this now unless needed.4. How this plugs into Public Works (important)
+Public Works becomes the broker, not the executorContent Realm → ContentParsingService → PublicWorks.call("cobrix-parser") → PublicWorks.call("kreuzberg-parser") → (optional) PublicWorks.call("ocr-service")Public Works responsibilities:Service discoveryAuthRate limitingObservabilityRetry policies
+Parsing services:DumbStatelessReplaceable
+This matches your Smart City philosophy perfectly.5. What does NOT change in your architecture
+ No changes to:DIL SDKLibrarian semanticsData steward governanceAgent patternsEmbedding flow
+These parsers are just another enabling service.6. Anti-patterns to avoid (this saves weeks)
+ Do NOT:Embed COBRIX directly in PythonLet parsing logic leak into orchestratorsMake parsers aware of tenantsStore parsed data inside parsing servicesOver-optimize OCR nowFinal recommendation (the calm version)Containerize COBRIX and KreuzbergKeep Tesseract as a library for nowExpose all of them via Public WorksTreat parsing as replaceable infrastructureLet Content + Librarian own meaning

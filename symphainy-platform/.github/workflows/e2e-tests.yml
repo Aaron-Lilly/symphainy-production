@@ -1,0 +1,189 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: [3.10, 3.11]
+        test-type: [e2e, playwright]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-test.txt
+    
+    - name: Install Playwright browsers
+      if: matrix.test-type == 'playwright'
+      run: |
+        playwright install chromium
+        playwright install-deps
+    
+    - name: Set up test environment
+      run: |
+        mkdir -p tests/e2e/test_data
+        mkdir -p logs
+        mkdir -p test_storage
+    
+    - name: Create test data
+      run: |
+        cat > tests/e2e/test_data/sample.csv << 'EOF'
+        name,age,city
+        John,25,New York
+        Jane,30,Los Angeles
+        Bob,35,Chicago
+        EOF
+        
+        cat > tests/e2e/test_data/sample.json << 'EOF'
+        {
+          "users": [
+            {"name": "John", "age": 25, "city": "New York"},
+            {"name": "Jane", "age": 30, "city": "Los Angeles"},
+            {"name": "Bob", "age": 35, "city": "Chicago"}
+          ]
+        }
+        EOF
+    
+    - name: Run E2E tests
+      if: matrix.test-type == 'e2e'
+      run: |
+        python -m pytest tests/e2e/ -v --tb=short --maxfail=5
+      env:
+        SYMPHAINY_ENV: testing
+        TEST_MODE: true
+        LOG_LEVEL: WARNING
+    
+    - name: Run Playwright tests
+      if: matrix.test-type == 'playwright'
+      run: |
+        python -m pytest tests/e2e/playwright/ -v --tb=short --maxfail=3
+      env:
+        SYMPHAINY_ENV: testing
+        TEST_MODE: true
+        LOG_LEVEL: WARNING
+        PLAYWRIGHT_HEADLESS: true
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.test-type }}-${{ matrix.python-version }}
+        path: |
+          test-results/
+          logs/
+          htmlcov/
+    
+    - name: Upload Playwright report
+      uses: actions/upload-artifact@v3
+      if: matrix.test-type == 'playwright' && always()
+      with:
+        name: playwright-report-${{ matrix.python-version }}
+        path: playwright-report/
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: e2e-tests
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.10
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-test.txt
+    
+    - name: Deploy to test environment
+      run: |
+        python scripts/deploy_test.py
+      env:
+        SYMPHAINY_ENV: testing
+        TEST_MODE: true
+    
+    - name: Run integration tests
+      run: |
+        python -m pytest tests/e2e/ -m integration -v --tb=short
+      env:
+        SYMPHAINY_ENV: testing
+        TEST_MODE: true
+    
+    - name: Cleanup
+      if: always()
+      run: |
+        pkill -f "python.*main.py" || true
+        pkill -f "playwright" || true
+
+  performance-tests:
+    runs-on: ubuntu-latest
+    needs: e2e-tests
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.10
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-test.txt
+    
+    - name: Run performance tests
+      run: |
+        python -m pytest tests/e2e/ -m slow -v --tb=short
+      env:
+        SYMPHAINY_ENV: testing
+        TEST_MODE: true
+        LOG_LEVEL: WARNING
+    
+    - name: Generate performance report
+      run: |
+        python -m pytest tests/e2e/ -m slow --benchmark-only --benchmark-save=performance
+      env:
+        SYMPHAINY_ENV: testing
+        TEST_MODE: true
+    
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-results
+        path: .benchmarks/
+
+
+
+
+

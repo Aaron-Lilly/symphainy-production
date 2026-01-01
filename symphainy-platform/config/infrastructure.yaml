@@ -1,0 +1,317 @@
+# Infrastructure Configuration - Layer 4
+# Infrastructure settings, service endpoints, and technical configurations
+
+# Database Infrastructure
+database:
+  postgresql:
+    host: "${DATABASE_HOST:-localhost}"
+    port: "${DATABASE_PORT:-5432}"
+    name: "${DATABASE_NAME:-symphainy_platform}"
+    user: "${DATABASE_USER:-postgres}"
+    pool_size: "${DATABASE_POOL_SIZE:-10}"
+    max_overflow: "${DATABASE_MAX_OVERFLOW:-20}"
+    pool_timeout: "${DATABASE_POOL_TIMEOUT:-30}"
+    pool_recycle: "${DATABASE_POOL_RECYCLE:-3600}"
+    ssl_mode: "prefer"
+    ssl_cert: null
+    ssl_key: null
+    ssl_root_cert: null
+  
+  connection_pooling:
+    enabled: true
+    min_connections: 5
+    max_connections: 50
+    connection_timeout: 30
+    idle_timeout: 600
+    max_lifetime: 3600
+
+# Redis Infrastructure
+redis:
+  host: "${REDIS_HOST:-localhost}"
+  port: "${REDIS_PORT:-6379}"
+  db: "${REDIS_DB:-0}"
+  password: null
+  max_connections: "${REDIS_MAX_CONNECTIONS:-20}"
+  socket_timeout: "${REDIS_SOCKET_TIMEOUT:-5}"
+  socket_connect_timeout: "${REDIS_SOCKET_CONNECT_TIMEOUT:-5}"
+  retry_on_timeout: true
+  health_check_interval: 30
+  
+  clustering:
+    enabled: false
+    nodes: []
+    read_from_replicas: true
+  
+  persistence:
+    enabled: true
+    rdb_save_interval: 900
+    aof_enabled: false
+
+# API Server Infrastructure
+api_server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  worker_class: "uvicorn.workers.UvicornWorker"
+  worker_connections: 1000
+  max_requests: 1000
+  max_requests_jitter: 100
+  timeout: 30
+  keepalive: 2
+  
+  ssl:
+    enabled: false
+    cert_file: null
+    key_file: null
+    ca_certs: null
+  
+  load_balancing:
+    enabled: false
+    algorithm: "round_robin"
+    health_check_path: "/health"
+    health_check_interval: 30
+
+# MCP Server Infrastructure
+mcp_server:
+  # Unified Smart City MCP endpoint (used by MCPClientManager)
+  base_url: "http://localhost"
+  port: 8000
+  endpoint_path: "/mcp"
+  # Full endpoint will be constructed as: {base_url}:{port}{endpoint_path}
+  # Default: http://localhost:8000/mcp
+  
+  # Connection settings
+  connection_timeout: 30
+  request_timeout: 60
+  retry_attempts: 3
+  retry_delay: 1
+  
+  # Health check
+  health_check_enabled: true
+  health_check_interval: 30
+  health_check_path: "/mcp/health"
+  
+  # Service discovery
+  # If enabled, MCPClientManager will discover endpoint via Curator
+  # If disabled or Curator unavailable, will use config values above
+  discovery_enabled: true
+  service_name: "SmartCityMCPServer"
+
+# External Service Endpoints
+external_services:
+  supabase:
+    url: "https://your-project.supabase.co"
+    anon_key: null  # Set in secrets
+    service_role_key: null  # Set in secrets
+    timeout: 30
+    retry_attempts: 3
+    retry_delay: 1
+  
+  google_cloud:
+    project_id: "symphainymvp-devbox"
+    credentials_json: null  # Set in secrets (GCS_CREDENTIALS_JSON)
+    default_region: "us-central1"
+    timeout: 60
+    retry_attempts: 3
+  
+  openai:
+    base_url: "https://api.openai.com/v1"
+    api_key: null  # Set in secrets
+    timeout: 120
+    retry_attempts: 3
+    retry_delay: 2
+  
+  anthropic:
+    base_url: "https://api.anthropic.com"
+    api_key: null  # Set in secrets
+    timeout: 120
+    retry_attempts: 3
+    retry_delay: 2
+
+# Monitoring and Observability
+monitoring:
+  health_checks:
+    enabled: true
+    interval: 30
+    timeout: 5
+    retries: 3
+    endpoints:
+      - "/health"
+      - "/health/database"
+      - "/health/redis"
+      - "/health/external"
+  
+  metrics:
+    enabled: true
+    collection_interval: 60
+    retention_days: 30
+    exporters:
+      - type: "prometheus"
+        port: 9090
+        path: "/metrics"
+      - type: "datadog"
+        api_key: null  # Set in secrets
+        site: "datadoghq.com"
+  
+  logging:
+    level: "INFO"
+    format: "json"
+    handlers:
+      - type: "console"
+        level: "INFO"
+      - type: "file"
+        filename: "logs/platform.log"
+        level: "DEBUG"
+        max_bytes: 10485760  # 10MB
+        backup_count: 5
+      - type: "sentry"
+        dsn: null  # Set in secrets
+        level: "ERROR"
+        environment: "production"
+  
+  tracing:
+    enabled: true
+    service_name: "symphainy-platform"
+    jaeger_endpoint: "http://localhost:14268/api/traces"
+    sampling_rate: 0.1
+    max_trace_length: 1000
+
+# Security Infrastructure
+security:
+  authentication:
+    jwt_secret: null  # Set in secrets
+    jwt_algorithm: "HS256"
+    jwt_expiration: 3600
+    refresh_token_expiration: 604800
+    password_hashing: "bcrypt"
+    password_rounds: 12
+  
+  authorization:
+    rbac_enabled: true
+    policy_engine: "casbin"
+    policy_file: "config/rbac_policy.csv"
+    cache_policies: true
+    cache_ttl: 300
+  
+  encryption:
+    algorithm: "AES-256-GCM"
+    key_rotation_days: 90
+    encrypt_sensitive_data: true
+    encrypt_at_rest: true
+    encrypt_in_transit: true
+  
+  network_security:
+    cors_enabled: true
+    cors_origins: ["https://your-domain.com"]
+    cors_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    cors_headers: ["Content-Type", "Authorization"]
+    rate_limiting: true
+    rate_limit_requests: 100
+    rate_limit_window: 3600
+
+# Storage Infrastructure
+storage:
+  local:
+    enabled: true
+    base_path: "storage"
+    max_file_size: 104857600  # 100MB
+    allowed_extensions: ["pdf", "docx", "txt", "csv", "json", "xml"]
+  
+  google_cloud_storage:
+    enabled: true
+    project_id: "symphainymvp-devbox"
+    bucket_name: "symphainy-bucket-2025"
+    credentials_json: null  # Set in secrets (GCS_CREDENTIALS_JSON)
+    default_region: "us-central1"
+    max_file_size: 1073741824  # 1GB
+  
+  s3:
+    enabled: false
+    bucket_name: null
+    region: "us-east-1"
+    access_key: null  # Set in secrets
+    secret_key: null  # Set in secrets
+    max_file_size: 1073741824  # 1GB
+
+# Message Queue Infrastructure
+message_queue:
+  redis:
+    enabled: true
+    host: "localhost"
+    port: 6379
+    db: 1
+    password: null
+    max_connections: 10
+  
+  celery:
+    enabled: true
+    broker_url: "redis://localhost:6379/1"
+    result_backend: "redis://localhost:6379/1"
+    task_serializer: "json"
+    result_serializer: "json"
+    accept_content: ["json"]
+    timezone: "UTC"
+    enable_utc: true
+    worker_concurrency: 4
+    worker_prefetch_multiplier: 1
+    task_acks_late: true
+    worker_disable_rate_limits: false
+
+# Cache Infrastructure
+cache:
+  redis:
+    enabled: true
+    host: "localhost"
+    port: 6379
+    db: 2
+    password: null
+    max_connections: 20
+    socket_timeout: 5
+    socket_connect_timeout: 5
+  
+  memory:
+    enabled: true
+    max_size: 1000
+    ttl: 3600
+    eviction_policy: "lru"
+  
+  distributed:
+    enabled: false
+    nodes: []
+    replication_factor: 2
+    consistency_level: "eventual"
+
+# Search Infrastructure
+search:
+  elasticsearch:
+    enabled: false
+    hosts: ["localhost:9200"]
+    index_prefix: "symphainy"
+    max_retries: 3
+    timeout: 30
+  
+  opensearch:
+    enabled: false
+    hosts: ["localhost:9200"]
+    index_prefix: "symphainy"
+    max_retries: 3
+    timeout: 30
+  
+  local:
+    enabled: true
+    index_path: "search_index"
+    max_documents: 100000
+    refresh_interval: 60
+
+# Service URLs Configuration
+# FIX: Added for configurable service URLs (Option C ready)
+# All URLs read from environment variables with defaults for local development
+service_urls:
+  arangodb: "${ARANGO_URL:-http://localhost:8529}"
+  redis: "${REDIS_URL:-redis://localhost:6379}"
+  consul: "${CONSUL_URL:-http://localhost:8501}"
+  grafana: "${GRAFANA_URL:-http://localhost:3100}"
+  tempo: "${TEMPO_URL:-http://localhost:3200}"
+  otel_collector_http: "${OTEL_COLLECTOR_HTTP_URL:-http://localhost:4318}"
+  otel_collector_grpc: "${OTEL_COLLECTOR_GRPC_URL:-http://localhost:4317}"
+  mcp_server: "${MCP_SERVER_URL:-http://localhost:8000}"

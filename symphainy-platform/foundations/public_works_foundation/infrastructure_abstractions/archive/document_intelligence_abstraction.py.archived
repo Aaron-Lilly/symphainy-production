@@ -1,0 +1,625 @@
+#!/usr/bin/env python3
+"""
+Document Intelligence Abstraction
+
+Infrastructure abstraction for document intelligence capabilities.
+Coordinates multiple format-specific adapters and NLP processing.
+Implements DocumentIntelligenceProtocol.
+"""
+
+import os
+import logging
+import tempfile
+import hashlib
+import asyncio
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+import json
+import uuid
+
+from ..abstraction_contracts.document_intelligence_protocol import DocumentIntelligenceProtocol
+from bases.contracts.document_intelligence import (
+    DocumentProcessingRequest, DocumentProcessingResult,
+    DocumentChunk, DocumentEntity, DocumentSimilarity
+)
+from ..infrastructure_adapters.document_processing_adapter import DocumentProcessingAdapter
+
+class DocumentIntelligenceAbstraction(DocumentIntelligenceProtocol):
+    """
+    Document intelligence abstraction coordinating multiple format-specific adapters.
+    
+    Routes document parsing to appropriate format-specific adapters based on file type,
+    then uses DocumentProcessingAdapter for NLP tasks (entity extraction, embeddings, etc.).
+    """
+    
+    def __init__(self,
+                 # Format-specific adapters (optional - will use if provided)
+                 beautifulsoup_adapter=None,
+                 python_docx_adapter=None,
+                 pdfplumber_adapter=None,
+                 pypdf2_adapter=None,
+                 pytesseract_adapter=None,
+                 opencv_adapter=None,
+                 cobol_adapter=None,
+                 # NLP adapter (required)
+                 document_processing_adapter=None,
+                 di_container=None,
+                 **kwargs):
+        """
+        Initialize Document Intelligence Abstraction.
+        
+        Args:
+            beautifulsoup_adapter: BeautifulSoup HTML adapter (optional)
+            python_docx_adapter: Python-DOCX Word adapter (optional)
+            pdfplumber_adapter: Pdfplumber PDF adapter (optional)
+            pypdf2_adapter: PyPDF2 PDF adapter (optional)
+            pytesseract_adapter: PyTesseract OCR adapter (optional)
+            opencv_adapter: OpenCV image adapter (optional)
+            cobol_adapter: COBOL processing adapter (optional)
+            document_processing_adapter: NLP processing adapter (required)
+            di_container: DI Container for utilities (optional)
+        """
+        if not document_processing_adapter:
+            raise ValueError("DocumentIntelligenceAbstraction requires document_processing_adapter via dependency injection")
+        
+        self.di_container = di_container
+        self.service_name = "document_intelligence_abstraction"
+        
+        # Get logger from DI Container if available
+        if di_container and hasattr(di_container, 'get_logger'):
+            self.logger = di_container.get_logger(self.service_name)
+        else:
+            self.logger = logging.getLogger("DocumentIntelligenceAbstraction")
+        
+        # Format-specific adapters
+        self.beautifulsoup_adapter = beautifulsoup_adapter
+        self.python_docx_adapter = python_docx_adapter
+        self.pdfplumber_adapter = pdfplumber_adapter
+        self.pypdf2_adapter = pypdf2_adapter
+        self.pytesseract_adapter = pytesseract_adapter
+        self.opencv_adapter = opencv_adapter
+        self.cobol_adapter = cobol_adapter
+        
+        # NLP adapter (required)
+        self.document_processing = document_processing_adapter
+        
+        # Document intelligence configuration
+        self.default_chunk_size = 1000
+        self.default_chunk_overlap = 200
+        self.similarity_threshold = 0.7
+        
+        # File type to adapter mapping
+        self._file_type_mapping = self._build_file_type_mapping()
+        
+        # Initialize abstraction
+        self._initialize_abstraction()
+    
+    def _initialize_abstraction(self):
+        """Initialize the document intelligence abstraction."""
+        try:
+            # Log available adapters
+            available_adapters = []
+            if self.beautifulsoup_adapter:
+                available_adapters.append("BeautifulSoup (HTML)")
+            if self.python_docx_adapter:
+                available_adapters.append("Python-DOCX (Word)")
+            if self.pdfplumber_adapter:
+                available_adapters.append("Pdfplumber (PDF)")
+            if self.pypdf2_adapter:
+                available_adapters.append("PyPDF2 (PDF)")
+            if self.pytesseract_adapter:
+                available_adapters.append("PyTesseract (OCR)")
+            if self.opencv_adapter:
+                available_adapters.append("OpenCV (Image)")
+            if self.cobol_adapter:
+                available_adapters.append("COBOL")
+            
+            self.logger.info(f"✅ Document intelligence abstraction initialized with adapters: {', '.join(available_adapters) if available_adapters else 'None (format-specific)'}")
+            self.logger.info(f"   NLP adapter: DocumentProcessingAdapter")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize Document Intelligence Abstraction: {e}")
+            raise
+    
+    def _build_file_type_mapping(self) -> Dict[str, Any]:
+        """Build mapping from file extensions to adapters."""
+        mapping = {}
+        
+        # HTML
+        if self.beautifulsoup_adapter:
+            mapping.update({ext: self.beautifulsoup_adapter for ext in ['html', 'htm', 'xml']})
+        
+        # Word documents
+        if self.python_docx_adapter:
+            mapping.update({ext: self.python_docx_adapter for ext in ['docx', 'doc']})
+        
+        # PDF documents
+        if self.pdfplumber_adapter:
+            mapping.update({ext: self.pdfplumber_adapter for ext in ['pdf']})
+        elif self.pypdf2_adapter:
+            mapping.update({ext: self.pypdf2_adapter for ext in ['pdf']})
+        
+        # Images (OCR)
+        if self.pytesseract_adapter:
+            mapping.update({ext: self.pytesseract_adapter for ext in ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff']})
+        
+        # COBOL
+        if self.cobol_adapter:
+            mapping.update({ext: self.cobol_adapter for ext in ['cbl', 'cob']})
+        
+        return mapping
+    
+    def _get_file_extension(self, filename: str) -> str:
+        """Extract file extension from filename."""
+        if '.' in filename:
+            return filename.rsplit('.', 1)[-1].lower()
+        return ''
+    
+    def _get_adapter_for_file(self, filename: str) -> Optional[Any]:
+        """Get appropriate adapter for file type."""
+        extension = self._get_file_extension(filename)
+        return self._file_type_mapping.get(extension)
+    
+    async def _parse_with_adapter(self, file_data: bytes, filename: str, 
+                                 adapter: Any, options: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Parse document using appropriate adapter.
+        
+        Handles different adapter interfaces (file_path vs bytes vs content strings).
+        """
+        try:
+            # Calculate file hash
+            file_hash = hashlib.md5(file_data).hexdigest()
+            
+            # Determine file type
+            extension = self._get_file_extension(filename)
+            
+            # Route to appropriate adapter based on interface
+            if adapter is None:
+                return {
+                    "error": f"No adapter available for file type: {extension}",
+                    "file_hash": file_hash
+                }
+            
+            # Try different adapter interfaces
+            parsed_content = None
+            
+            # Interface 1: Adapter expects file_path (python_docx, pdfplumber, pypdf2, pytesseract, cobol)
+            if hasattr(adapter, 'extract_text') or hasattr(adapter, 'extract_text_from_file'):
+                # CRITICAL: Wrap blocking tempfile operations in asyncio.to_thread() to prevent SSH crashes
+                # File I/O can hang if filesystem is slow or locked
+                import asyncio
+                try:
+                    def _create_temp_file():
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{extension}') as tmp_file:
+                            tmp_file.write(file_data)
+                            return tmp_file.name
+                    
+                    tmp_path = await asyncio.wait_for(
+                        asyncio.to_thread(_create_temp_file),
+                        timeout=10.0  # 10 second timeout for tempfile creation
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.error(f"❌ Tempfile creation timed out after 10 seconds for {filename}")
+                    return {
+                        "error": f"Tempfile creation timed out - filesystem may be slow or locked",
+                        "file_hash": file_hash,
+                        "filename": filename
+                    }
+                
+                try:
+                    # Try extract_text method (python_docx, pytesseract)
+                    if hasattr(adapter, 'extract_text'):
+                        result = await adapter.extract_text(tmp_path)
+                        if result.get("success"):
+                            parsed_content = {
+                                "text": result.get("text", ""),
+                                "metadata": result.get("metadata", {}),
+                                "file_hash": file_hash,
+                                "page_count": result.get("page_count", 1),
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                    
+                    # Try extract_text_from_file method (pypdf2)
+                    elif hasattr(adapter, 'extract_text_from_file'):
+                        result = await adapter.extract_text_from_file(tmp_path)
+                        if result.get("success"):
+                            parsed_content = {
+                                "text": result.get("text", ""),
+                                "metadata": result.get("metadata", {}),
+                                "file_hash": file_hash,
+                                "page_count": result.get("page_count", 1),
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                    
+                    # Try extract_tables_from_file method (pdfplumber)
+                    elif hasattr(adapter, 'extract_tables_from_file'):
+                        result = await adapter.extract_tables_from_file(tmp_path)
+                        if result.get("success"):
+                            # Extract text from tables
+                            text = ""
+                            for table in result.get("tables", []):
+                                for row in table.get("rows", []):
+                                    text += " ".join(str(cell) for cell in row) + "\n"
+                            
+                            parsed_content = {
+                                "text": text,
+                                "metadata": result.get("metadata", {}),
+                                "file_hash": file_hash,
+                                "page_count": result.get("page_count", 1),
+                                "tables": result.get("tables", []),
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                    
+                    # Try parse_cobol_file method (cobol)
+                    elif hasattr(adapter, 'parse_cobol_file'):
+                        # COBOL needs copybook - this is a placeholder
+                        result = await adapter.parse_cobol_file(tmp_path, "")
+                        if result.get("success"):
+                            parsed_content = {
+                                "text": str(result.get("data", "")),
+                                "metadata": result.get("metadata", {}),
+                                "file_hash": file_hash,
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                
+                finally:
+                    # CRITICAL: Wrap blocking file cleanup in asyncio.to_thread() to prevent SSH crashes
+                    # File I/O can hang if filesystem is slow or locked
+                    try:
+                        def _cleanup_temp_file():
+                            if os.path.exists(tmp_path):
+                                os.unlink(tmp_path)
+                        
+                        await asyncio.wait_for(
+                            asyncio.to_thread(_cleanup_temp_file),
+                            timeout=5.0  # 5 second timeout for file cleanup
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.warning(f"⚠️ Tempfile cleanup timed out for {tmp_path}")
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ Tempfile cleanup failed for {tmp_path}: {e}")
+            
+            # Interface 2: Adapter expects content string (beautifulsoup)
+            elif hasattr(adapter, 'parse_html'):
+                try:
+                    html_content = file_data.decode('utf-8')
+                    result = await adapter.parse_html(html_content)
+                    if result.get("success"):
+                        parsed_content = {
+                            "text": result.get("text", ""),
+                            "metadata": result.get("metadata", {}),
+                            "file_hash": file_hash,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                except UnicodeDecodeError as e:
+                    self.logger.error(f"❌ Failed to decode HTML content: {e}")
+                    # Return error dict instead of raising
+                    return {
+                        "error": f"Failed to decode HTML content: {e}",
+                        "file_hash": file_hash
+                    }
+            else:
+                return {
+                    "error": f"Adapter {type(adapter).__name__} does not support expected interface",
+                    "file_hash": file_hash
+                }
+            
+            # If parsed_content is still None after all adapter attempts, return error dict
+            if parsed_content is None:
+                return {
+                    "error": f"Failed to parse document with adapter {type(adapter).__name__} - adapter returned unsuccessful result",
+                    "file_hash": file_hash,
+                    "filename": filename
+                }
+            
+            return parsed_content
+                
+        except Exception as e:
+            self.logger.error(f"Failed to parse document with adapter: {e}")
+            # Return error dict instead of raising to allow graceful handling
+            return {
+                "error": f"Failed to parse document with adapter: {e}",
+                "file_hash": hashlib.md5(file_data).hexdigest() if file_data else "unknown",
+                "filename": filename
+            }
+    
+    async def process_document(self, request: DocumentProcessingRequest) -> DocumentProcessingResult:
+        """
+        Process document for intelligence extraction.
+        
+        Routes to appropriate format-specific adapter for parsing,
+        then uses DocumentProcessingAdapter for NLP tasks.
+        
+        Args:
+            request: Document processing request
+            
+        Returns:
+            DocumentProcessingResult: Processing result
+        """
+        try:
+            self.logger.info(f"🔧 process_document: Starting processing for {request.filename}")
+            # Get appropriate adapter for file type
+            adapter = self._get_adapter_for_file(request.filename)
+            self.logger.info(f"🔧 process_document: Adapter for {request.filename}: {type(adapter).__name__ if adapter else 'None'}")
+            
+            # For plain text files (no extension or .txt), handle directly without adapter
+            extension = self._get_file_extension(request.filename)
+            self.logger.info(f"🔧 process_document: File extension: '{extension}' (filename: {request.filename})")
+            
+            # If no extension and no adapter, try to detect from content or return error
+            if not extension and not adapter:
+                self.logger.warning(f"⚠️ process_document: No extension and no adapter for {request.filename} - returning error")
+                return DocumentProcessingResult(
+                    result_id=str(uuid.uuid4()),
+                    filename=request.filename,
+                    success=False,
+                    error=f"No adapter available for file type (no extension detected): {request.filename}",
+                    timestamp=datetime.now()
+                )
+            
+            if extension == 'txt':
+                # Plain text file - decode directly
+                try:
+                    text = request.file_data.decode('utf-8')
+                    parsed_content = {
+                        "text": text,
+                        "metadata": {"file_type": "text/plain", "encoding": "utf-8"},
+                        "file_hash": hashlib.md5(request.file_data).hexdigest(),
+                        "page_count": 1,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                except UnicodeDecodeError:
+                    # Try other encodings
+                    try:
+                        text = request.file_data.decode('latin-1')
+                        parsed_content = {
+                            "text": text,
+                            "metadata": {"file_type": "text/plain", "encoding": "latin-1"},
+                            "file_hash": hashlib.md5(request.file_data).hexdigest(),
+                            "page_count": 1,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    except Exception as e:
+                        return DocumentProcessingResult(
+                            result_id=str(uuid.uuid4()),
+                            filename=request.filename,
+                            success=False,
+                            error=f"Failed to decode text file: {e}",
+                            timestamp=datetime.now()
+                        )
+            else:
+                # Use format-specific adapter
+                self.logger.info(f"🔧 process_document: Calling _parse_with_adapter for {request.filename}")
+                parsed_content = await self._parse_with_adapter(
+                    request.file_data,
+                    request.filename,
+                    adapter,
+                    request.options
+                )
+                self.logger.info(f"🔧 process_document: _parse_with_adapter returned, has error: {'error' in parsed_content}")
+            
+            if "error" in parsed_content:
+                self.logger.warning(f"⚠️ process_document: Parsing failed with error: {parsed_content.get('error')}")
+                return DocumentProcessingResult(
+                    result_id=str(uuid.uuid4()),
+                    filename=request.filename,
+                    success=False,
+                    error=parsed_content["error"],
+                    timestamp=datetime.now()
+                )
+            
+            # Extract text from parsed content
+            text = parsed_content.get("text", "")
+            if not text:
+                return DocumentProcessingResult(
+                    result_id=str(uuid.uuid4()),
+                    filename=request.filename,
+                    success=False,
+                    error="No text extracted from document",
+                    timestamp=datetime.now()
+                )
+            
+            # Extract entities using NLP adapter
+            entities = await self.document_processing.extract_entities(text)
+            
+            # Chunk text using NLP adapter
+            chunks = await self.document_processing.chunk_text(
+                text, 
+                request.chunk_size or self.default_chunk_size,
+                request.chunk_overlap or self.default_chunk_overlap
+            )
+            
+            # Create document chunks
+            document_chunks = [
+                DocumentChunk(
+                    chunk_id=str(uuid.uuid4()),
+                    text=chunk["text"],
+                    start_position=chunk["start"],
+                    end_position=chunk["end"],
+                    length=chunk["length"]
+                )
+                for chunk in chunks
+            ]
+            
+            # Create document entities
+            document_entities = [
+                DocumentEntity(
+                    entity_id=str(uuid.uuid4()),
+                    text=entity["text"],
+                    label=entity["label"],
+                    start_position=entity["start"],
+                    end_position=entity["end"],
+                    confidence=entity["confidence"]
+                )
+                for entity in entities
+            ]
+            
+            # Create result
+            result = DocumentProcessingResult(
+                result_id=str(uuid.uuid4()),
+                filename=request.filename,
+                success=True,
+                file_hash=parsed_content.get("file_hash", hashlib.md5(request.file_data).hexdigest()),
+                text_length=len(text),
+                page_count=parsed_content.get("page_count", 1),
+                chunks=document_chunks,
+                entities=document_entities,
+                metadata=parsed_content.get("metadata", {}),
+                timestamp=datetime.now()
+            )
+            
+            self.logger.info(f"✅ Document processed: {request.filename}")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to process document: {e}")
+            raise  # Re-raise for service layer to handle
+    
+    async def calculate_document_similarity(self, text1: str, text2: str) -> Dict[str, Any]:
+        """
+        Calculate similarity between two documents.
+        
+        Args:
+            text1: First document text
+            text2: Second document text
+            
+        Returns:
+            DocumentSimilarity: Similarity result
+        """
+        try:
+            similarity_score = await self.document_processing.calculate_similarity(text1, text2)
+            
+            similarity = DocumentSimilarity(
+                similarity_id=str(uuid.uuid4()),
+                similarity_score=similarity_score,
+                is_similar=similarity_score >= self.similarity_threshold,
+                threshold=self.similarity_threshold,
+                timestamp=datetime.now()
+            )
+            
+            self.logger.info(f"✅ Document similarity calculated: {similarity_score}")
+            
+            return similarity
+            
+        except Exception as e:
+            self.logger.error(f"❌ Document similarity check failed: {e}")
+            raise  # Re-raise for service layer to handle
+    
+    async def generate_document_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """
+        Generate embeddings for documents.
+        
+        Args:
+            texts: List of document texts
+            
+        Returns:
+            List[List[float]]: Document embeddings
+        """
+        try:
+            embeddings = await self.document_processing.generate_embeddings(texts)
+            
+            self.logger.info(f"✅ Generated embeddings for {len(texts)} documents")
+            
+            return embeddings
+            
+        except Exception as e:
+            self.logger.error(f"Failed to generate document embeddings: {e}")
+            raise  # Re-raise for service layer to handle
+
+        """
+        Extract entities from document text.
+        
+        Args:
+            text: Document text
+            
+        Returns:
+            List[DocumentEntity]: Extracted entities
+        """
+        try:
+            entities = await self.document_processing.extract_entities(text)
+            
+            document_entities = [
+                DocumentEntity(
+                    entity_id=str(uuid.uuid4()),
+                    text=entity["text"],
+                    label=entity["label"],
+                    start_position=entity["start"],
+                    end_position=entity["end"],
+                    confidence=entity["confidence"]
+                )
+                for entity in entities
+            ]
+            
+            self.logger.info(f"✅ Extracted {len(document_entities)} entities")
+            
+            return document_entities
+            
+        except Exception as e:
+            self.logger.error(f"Failed to extract document entities: {e}")
+            raise  # Re-raise for service layer to handle
+
+        """
+        Chunk document text.
+        
+        Args:
+            text: Document text
+            chunk_size: Chunk size
+            chunk_overlap: Chunk overlap
+            
+        Returns:
+            List[DocumentChunk]: Document chunks
+        """
+        try:
+            chunks = await self.document_processing.chunk_text(
+                text, 
+                chunk_size or self.default_chunk_size,
+                chunk_overlap or self.default_chunk_overlap
+            )
+            
+            document_chunks = [
+                DocumentChunk(
+                    chunk_id=str(uuid.uuid4()),
+                    text=chunk["text"],
+                    start_position=chunk["start"],
+                    end_position=chunk["end"],
+                    length=chunk["length"]
+                )
+                for chunk in chunks
+            ]
+            
+            self.logger.info(f"✅ Document chunked into {len(document_chunks)} pieces")
+            
+            return document_chunks
+            
+        except Exception as e:
+            self.logger.error(f"Failed to chunk document: {e}")
+            raise  # Re-raise for service layer to handle
+
+        """
+        Perform health check.
+        
+        Returns:
+            Dict: Health check result
+        """
+        try:
+            # Get document processing health
+            processing_health = await self.document_processing.health_check()
+            
+            result = {
+                "healthy": processing_health.get("healthy", False),
+                "document_processing": processing_health,
+                "abstraction": {
+                    "chunk_size": self.default_chunk_size,
+                    "chunk_overlap": self.default_chunk_overlap,
+                    "similarity_threshold": self.similarity_threshold
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Health check failed: {e}")
+
+            raise  # Re-raise for service layer to handle

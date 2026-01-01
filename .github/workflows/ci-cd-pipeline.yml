@@ -1,0 +1,679 @@
+# SymphAIny Platform CI/CD Pipeline
+# Runs tests, generates reports, and deploys on success
+# NOTE: Disabled automatic triggers - platform is not production-ready yet
+# Run manually from GitHub Actions tab when needed
+
+name: CI/CD Pipeline
+
+on:
+  # Disabled automatic triggers to prevent email spam during development
+  # push:
+  #   branches:
+  #     - main
+  #     - develop
+  #     - 'phase*'
+  # pull_request:
+  #   branches:
+  #     - main
+  #     - develop
+  workflow_dispatch:  # Manual trigger only
+
+env:
+  PYTHON_VERSION: '3.10'
+  NODE_VERSION: '18'
+  BACKEND_PORT: 8000
+  FRONTEND_PORT: 3000
+  # Pre-authorized test user credentials (no email spam)
+  TEST_EMAIL: 'testuser0@symphainy.com'
+  TEST_PASSWORD: 'TestPassword123!'
+  TEST_EMAIL_DOMAIN: 'symphainy.com'
+
+jobs:
+  # ============================================================================
+  # JOB 1: LINT AND CODE QUALITY
+  # ============================================================================
+  lint:
+    name: Lint & Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Validate poetry.lock
+        working-directory: symphainy-platform
+        run: |
+          pip install tomli
+          python3 scripts/validate-poetry-lock.py
+      
+      - name: Install Python linters
+        run: |
+          pip install flake8 black mypy pylint
+      
+      - name: Run flake8
+        run: |
+          flake8 symphainy-platform --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 symphainy-platform --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      
+      - name: Check formatting with black
+        run: |
+          black --check symphainy-platform tests
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Install frontend and lint
+        working-directory: symphainy-frontend
+        run: |
+          npm ci
+          npm run lint || true  # Don't fail on lint warnings
+
+  # ============================================================================
+  # JOB 2: BACKEND UNIT & INTEGRATION TESTS
+  # ============================================================================
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    
+    services:
+      # If you need databases, add them here
+      # postgres:
+      #   image: postgres:15
+      #   env:
+      #     POSTGRES_PASSWORD: postgres
+      #   options: >-
+      #     --health-cmd pg_isready
+      #     --health-interval 10s
+      #     --health-timeout 5s
+      #     --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install backend dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r symphainy-platform/requirements.txt
+          pip install pytest pytest-asyncio pytest-cov pytest-timeout httpx
+      
+      - name: Install test dependencies
+        working-directory: tests
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run backend unit tests
+        working-directory: tests
+        run: |
+          echo "🧪 Running backend unit tests..."
+          pytest tests/unit/ -v -m unit --cov=../symphainy-platform --cov-report=xml --cov-report=html --cov-fail-under=80 --timeout=30 || {
+            echo "❌ Unit tests failed or coverage below 80%"
+            exit 1
+          }
+          echo "✅ Unit tests passed with coverage >= 80%"
+      
+      - name: Run backend integration tests
+        working-directory: tests
+        run: |
+          echo "🧪 Running backend integration tests..."
+          pytest tests/integration/ -v -m integration --timeout=60 || {
+            echo "❌ Integration tests failed"
+            exit 1
+          }
+          echo "✅ Integration tests passed"
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./tests/coverage.xml
+          flags: backend
+          name: backend-coverage
+      
+      - name: Archive test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-test-results
+          path: |
+            tests/htmlcov/
+            tests/**/*.xml
+
+  # ============================================================================
+  # JOB 3: FRONTEND TESTS
+  # ============================================================================
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: symphainy-frontend/package-lock.json
+      
+      - name: Install frontend dependencies
+        working-directory: symphainy-frontend
+        run: npm ci
+      
+      - name: Run frontend unit tests
+        working-directory: symphainy-frontend
+        run: |
+          echo "🧪 Running frontend unit tests..."
+          npm test -- --coverage --watchAll=false || {
+            echo "❌ Frontend tests failed"
+            exit 1
+          }
+          echo "✅ Frontend tests passed"
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./symphainy-frontend/coverage/lcov.info
+          flags: frontend
+          name: frontend-coverage
+      
+      - name: Archive test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-test-results
+          path: symphainy-frontend/coverage/
+
+  # ============================================================================
+  # JOB 4: E2E TESTS (THE CRITICAL ONES!)
+  # ============================================================================
+  e2e-tests:
+    name: E2E Tests - Critical Journey
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: symphainy-frontend/package-lock.json
+      
+      - name: Install backend dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r symphainy-platform/requirements.txt
+          pip install pytest pytest-asyncio pytest-timeout playwright
+          playwright install chromium
+          playwright install-deps
+      
+      - name: Install frontend dependencies
+        working-directory: symphainy-frontend
+        run: npm ci
+      
+      - name: Build frontend
+        working-directory: symphainy-frontend
+        run: npm run build
+      
+      - name: Start backend server
+        run: |
+          cd symphainy-platform
+          python3 main.py &
+          echo $! > backend.pid
+          sleep 10  # Wait for backend to start
+      
+      - name: Start frontend server
+        working-directory: symphainy-frontend
+        run: |
+          npm run start &
+          echo $! > frontend.pid
+          sleep 10  # Wait for frontend to start
+        env:
+          PORT: ${{ env.FRONTEND_PORT }}
+      
+      - name: Wait for services
+        run: |
+          echo "⏳ Waiting for backend to be ready..."
+          timeout 120 bash -c 'until curl -f http://localhost:8000/health 2>/dev/null; do sleep 2; done' || {
+            echo "❌ Backend failed to start"
+            docker logs symphainy-backend-prod 2>&1 | tail -50 || true
+            exit 1
+          }
+          echo "✅ Backend is ready"
+          
+          echo "⏳ Waiting for frontend to be ready..."
+          timeout 120 bash -c 'until curl -f http://localhost:3000 2>/dev/null; do sleep 2; done' || {
+            echo "❌ Frontend failed to start"
+            docker logs symphainy-frontend-prod 2>&1 | tail -50 || true
+            exit 1
+          }
+          echo "✅ Frontend is ready"
+      
+      - name: Install test dependencies
+        working-directory: tests
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run E2E Tests - Platform Startup
+        working-directory: tests
+        env:
+          TEST_API_URL: http://localhost:${{ env.BACKEND_PORT }}
+          TEST_USE_REAL_INFRASTRUCTURE: false  # Use mocks in CI for speed
+        run: |
+          echo "🧪 Running platform startup E2E tests..."
+          pytest tests/e2e/production/smoke_tests/test_platform_startup_e2e.py -v -m e2e --timeout=60 || {
+            echo "❌ Platform startup tests failed"
+            exit 1
+          }
+          echo "✅ Platform startup tests passed"
+      
+      - name: Run E2E Tests - Pillar Validation
+        working-directory: tests
+        env:
+          TEST_API_URL: http://localhost:${{ env.BACKEND_PORT }}
+          TEST_USE_REAL_INFRASTRUCTURE: false  # Use mocks in CI for speed
+        run: |
+          echo "🧪 Running pillar validation E2E tests..."
+          pytest tests/e2e/production/pillar_validation/ -v -m e2e --timeout=120 || {
+            echo "❌ Pillar validation tests failed"
+            exit 1
+          }
+          echo "✅ Pillar validation tests passed"
+      
+      - name: Run E2E Tests - Cross-Pillar Workflows
+        working-directory: tests
+        env:
+          TEST_API_URL: http://localhost:${{ env.BACKEND_PORT }}
+          TEST_USE_REAL_INFRASTRUCTURE: false  # Use mocks in CI for speed
+        run: |
+          echo "🧪 Running cross-pillar workflow E2E tests..."
+          pytest tests/e2e/production/cross_pillar/ -v -m e2e --timeout=180 || {
+            echo "❌ Cross-pillar workflow tests failed"
+            exit 1
+          }
+          echo "✅ Cross-pillar workflow tests passed"
+          pytest e2e/test_operations_pillar_smoke.py -v -s --timeout=180 || {
+            echo "❌ Operations pillar smoke test failed"
+            exit 1
+          }
+          pytest e2e/test_business_outcomes_pillar_smoke.py -v -s --timeout=180 || {
+            echo "❌ Business outcomes pillar smoke test failed"
+            exit 1
+          }
+          echo "✅ All critical E2E tests passed"
+      
+      - name: Upload E2E screenshots
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-screenshots
+          path: tests/screenshots/
+      
+      - name: Upload E2E videos
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-videos
+          path: tests/screenshots/**/videos/
+      
+      - name: Stop services
+        if: always()
+        run: |
+          kill $(cat symphainy-platform/backend.pid) || true
+          kill $(cat symphainy-frontend/frontend.pid) || true
+
+  # ============================================================================
+  # JOB 5: GENERATE TEST REPORT
+  # ============================================================================
+  test-report:
+    name: Generate Test Report
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, e2e-tests]
+    if: always()
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+      
+      - name: Generate summary
+        run: |
+          echo "# Test Results Summary" > test-summary.md
+          echo "" >> test-summary.md
+          echo "## Backend Tests" >> test-summary.md
+          echo "- Unit tests: See backend-test-results/" >> test-summary.md
+          echo "- Integration tests: See backend-test-results/" >> test-summary.md
+          echo "" >> test-summary.md
+          echo "## Frontend Tests" >> test-summary.md
+          echo "- Component tests: See frontend-test-results/" >> test-summary.md
+          echo "" >> test-summary.md
+          echo "## E2E Tests" >> test-summary.md
+          echo "- Screenshots: See e2e-screenshots/" >> test-summary.md
+          echo "- Videos: See e2e-videos/" >> test-summary.md
+      
+      - name: Upload test summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-summary
+          path: test-summary.md
+
+  # ============================================================================
+  # JOB 5: QUALITY GATES (Phase 3)
+  # ============================================================================
+  quality-gates:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, e2e-tests]
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install security and quality tools
+        run: |
+          pip install --upgrade pip
+          pip install bandit safety pip-audit black flake8
+      
+      - name: Run Bandit security scan
+        working-directory: symphainy-platform
+        continue-on-error: true
+        run: |
+          echo "🔒 Running Bandit security scan..."
+          bandit -r . -ll || {
+            echo "⚠️ Bandit found security issues (non-blocking for now)"
+          }
+      
+      - name: Run Safety dependency check
+        working-directory: symphainy-platform
+        run: |
+          echo "🔒 Checking dependencies for known vulnerabilities..."
+          safety check || {
+            echo "❌ Safety found vulnerable dependencies"
+            exit 1
+          }
+          echo "✅ Safety check passed"
+      
+      - name: Run pip-audit
+        working-directory: symphainy-platform
+        run: |
+          echo "🔒 Running pip-audit..."
+          pip-audit --desc || {
+            echo "❌ pip-audit found vulnerable dependencies"
+            exit 1
+          }
+          echo "✅ pip-audit passed"
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Install frontend dependencies
+        working-directory: symphainy-frontend
+        run: npm ci
+      
+      - name: Run npm audit
+        working-directory: symphainy-frontend
+        run: |
+          echo "🔒 Running npm audit..."
+          npm audit --audit-level=moderate || {
+            echo "❌ npm audit found vulnerabilities"
+            exit 1
+          }
+          echo "✅ npm audit passed"
+      
+      - name: Check code formatting
+        run: |
+          echo "🎨 Checking code formatting..."
+          black --check symphainy-platform tests || {
+            echo "❌ Code formatting check failed"
+            exit 1
+          }
+          echo "✅ Code formatting check passed"
+      
+      - name: Run flake8 critical checks
+        run: |
+          echo "🔍 Running flake8 critical checks..."
+          flake8 symphainy-platform --count --select=E9,F63,F7,F82 --show-source --statistics || {
+            echo "❌ Flake8 found critical errors"
+            exit 1
+          }
+          echo "✅ Flake8 critical checks passed"
+
+  # ============================================================================
+  # JOB 5.5: TEST ENVIRONMENT VALIDATION (before staging)
+  # ============================================================================
+  test-environment-validation:
+    name: Test Environment Validation
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, e2e-tests, quality-gates]
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Start test infrastructure
+        run: |
+          echo "🏗️ Starting test infrastructure..."
+          docker-compose -f docker-compose.test.yml up -d redis arangodb consul meilisearch
+          sleep 30
+      
+      - name: Build and start test environment
+        run: |
+          echo "🏗️ Building application containers..."
+          docker-compose -f docker-compose.test.yml build backend frontend
+          echo "🚀 Starting application services..."
+          docker-compose -f docker-compose.test.yml up -d backend frontend
+          sleep 60
+      
+      - name: Wait for services
+        run: |
+          echo "⏳ Waiting for test environment services..."
+          timeout 180 bash -c 'until curl -f http://localhost:8001/health 2>/dev/null; do sleep 3; done' || {
+            echo "❌ Backend not ready in test environment"
+            docker logs symphainy-backend-test 2>&1 | tail -50
+            exit 1
+          }
+          timeout 120 bash -c 'until curl -f http://localhost:3001 2>/dev/null; do sleep 3; done' || {
+            echo "❌ Frontend not ready in test environment"
+            docker logs symphainy-frontend-test 2>&1 | tail -50
+            exit 1
+          }
+          echo "✅ Test environment services are ready"
+      
+      - name: Run smoke tests in test environment
+        working-directory: tests
+        env:
+          TEST_BACKEND_URL: http://localhost:8001
+          TEST_FRONTEND_URL: http://localhost:3001
+        run: |
+          echo "🧪 Running smoke tests in test environment..."
+          pip install pytest pytest-asyncio pytest-timeout httpx
+          # Run test environment smoke tests
+          pytest e2e/test_environment_smoke_tests.py -v --timeout=180 || {
+            echo "❌ Smoke tests failed in test environment"
+            exit 1
+          }
+          # Run production smoke tests if they exist
+          if [ -d "e2e/production/smoke_tests" ]; then
+            pytest e2e/production/smoke_tests/ -v --timeout=180 || {
+              echo "❌ Production smoke tests failed in test environment"
+              exit 1
+            }
+          fi
+          echo "✅ Smoke tests passed"
+      
+      - name: Cleanup test environment
+        if: always()
+        run: |
+          echo "🧹 Cleaning up test environment..."
+          docker-compose -f docker-compose.test.yml down -v || true
+
+  # ============================================================================
+  # JOB 6: DEPLOY TO STAGING (if tests pass)
+  # ============================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, e2e-tests, quality-gates, test-environment-validation]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: https://staging.symphainy.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials (example)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: Deploy backend to staging
+        run: |
+          echo "Deploying backend to staging..."
+          # Add your deployment commands here
+          # Example: aws ecs update-service --cluster staging --service symphainy-backend --force-new-deployment
+      
+      - name: Deploy frontend to staging
+        run: |
+          echo "Deploying frontend to staging..."
+          # Example: aws s3 sync symphainy-frontend/build s3://staging-frontend-bucket
+          # Example: aws cloudfront create-invalidation --distribution-id XXXXX --paths "/*"
+      
+      - name: Run smoke tests on staging
+        run: |
+          echo "Running smoke tests on staging..."
+          # curl https://staging.symphainy.com/health
+
+  # ============================================================================
+  # JOB 7: DEPLOY TO PRODUCTION (manual approval required)
+  # ============================================================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, e2e-tests, quality-gates, test-environment-validation]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://symphainy.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: Deploy backend to production
+        run: |
+          echo "Deploying backend to production..."
+          # Add your deployment commands
+      
+      - name: Deploy frontend to production
+        run: |
+          echo "Deploying frontend to production..."
+      
+      - name: Run production smoke tests
+        run: |
+          echo "Running smoke tests on production..."
+      
+      - name: Notify team of deployment
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: '🚀 Production deployment complete!'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        if: always()
+
+  # ============================================================================
+  # JOB 8: NOTIFICATION
+  # ============================================================================
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, e2e-tests]
+    if: always()
+    
+    steps:
+      - name: Check test results
+        id: check
+        run: |
+          if [ "${{ needs.backend-tests.result }}" == "success" ] && \
+             [ "${{ needs.frontend-tests.result }}" == "success" ] && \
+             [ "${{ needs.e2e-tests.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Send Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ steps.check.outputs.status }}
+          text: |
+            CI/CD Pipeline ${{ steps.check.outputs.status }}
+            Backend: ${{ needs.backend-tests.result }}
+            Frontend: ${{ needs.frontend-tests.result }}
+            E2E: ${{ needs.e2e-tests.result }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        if: always()
+      
+      - name: Create GitHub issue on failure
+        if: steps.check.outputs.status == 'failure' && github.ref == 'refs/heads/main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 CI/CD Pipeline Failed',
+              body: `Pipeline failed on main branch.\n\nBackend: ${{ needs.backend-tests.result }}\nFrontend: ${{ needs.frontend-tests.result }}\nE2E: ${{ needs.e2e-tests.result }}\n\nSee: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              labels: ['bug', 'ci-cd']
+            })
+
+
+
+

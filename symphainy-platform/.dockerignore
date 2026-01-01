@@ -1,0 +1,122 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Testing
+tests/
+**/tests/
+**/test_*.py
+**/*_test.py
+**/*.test.py
+**/*.spec.py
+coverage/
+htmlcov/
+.pytest_cache/
+.coverage
+coverage.xml
+.tox/
+.hypothesis/
+
+# Documentation
+docs/
+*.md
+README.md
+LICENSE
+CHANGELOG.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Environment files (except .env.secrets which is needed)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.testing
+test_config.env
+env_secrets_for_*.md
+
+# Archives
+archive/
+*.tar.gz
+*.zip
+
+# Logs
+logs/
+*.log
+logs.sh
+
+# Scripts (non-deployment)
+scripts/
+# Exception: validation script needed for build
+!scripts/validate-poetry-lock.py
+startup.sh
+stop.sh
+
+# Docker
+docker-compose*.yml
+Dockerfile.ci
+.dockerignore
+
+# CI/CD
+.github/
+
+# Config files (development only)
+config/development.env
+config/testing.env
+
+# Platform infrastructure config files (not needed in container)
+# NOTE: platform_infrastructure/ Python module IS needed - don't exclude it
+grafana/
+tempo-config.yaml
+otel-collector-config.yaml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.pyc
+*.pyo
+*.pyd
+.Python
+credential_file_for_reference.md
+SECRETS_*.md
+SECURITY_*.md

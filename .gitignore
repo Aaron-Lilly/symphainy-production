@@ -1,0 +1,246 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments - CRITICAL: These contain large compiled libraries
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+**/venv/
+**/env/
+**/.venv/
+**/.env/
+**/ENV/
+**/env.bak/
+**/venv.bak/
+
+# Python package caches - CRITICAL: These can be huge
+.cache/
+**/.cache/
+**/pip/
+**/pip-cache/
+**/pip_cache/
+**/site-packages/
+**/lib/python*/site-packages/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test
+.env.test.local
+.env.production.local
+.env.secrets
+**/.env.secrets
+**/*env_secrets*
+**/credential_file*
+**/*credential*
+
+# Test credentials
+test-credentials.json
+**/test-credentials.json
+
+# Node.js (for frontend) - CRITICAL: These contain large binaries
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+**/.npm/
+**/.yarn/
+
+# Next.js - CRITICAL: Cache files can be huge
+.next/
+**/.next/
+out/
+**/out/
+build/
+**/build/
+
+# Node.js binaries - CRITICAL: These are 50MB+ each
+*.node
+**/*.node
+**/bin/
+**/executable/
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# LLM Response Cache (for cost control in tests)
+tests/.llm_cache/
+**/.llm_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# API Keys and secrets
+*.key
+*.pem
+secrets/
+.secrets/
+
+# Configuration files with sensitive data
+config/production.env
+config/staging.env
+config/local.env
+
+# Backup files
+*.bak
+*.backup
+*_backup
+*_old
+**/*_old
+**/*_backup
+**/*.bak
+**/*.backup
+
+# Large compiled files and binaries
+*.so
+*.dll
+*.dylib
+*.exe
+*.bin
+**/*.so
+**/*.dll
+**/*.dylib
+**/*.exe
+**/*.bin
+
+# Archive and legacy directories
+archived/
+**/archived/
+legacy/
+**/legacy/
+old/
+**/old/
+
+# Documentation build
+docs/_build/
+site/
+
+# Package files
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# Local development
+.local/
+local/
+
+# Additional large file patterns
+*.pack
+*.pack.old
+**/*.pack
+**/*.pack.old
+*.body
+**/*.body
+
+# Machine learning models and data files
+*.model
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.npz
+*.npy
+**/*.model
+**/*.pkl
+**/*.pickle
+**/*.h5
+**/*.hdf5
+**/*.npz
+**/*.npy
+
+# Large data files
+*.csv
+*.json
+*.xml
+*.parquet
+*.feather
+**/data/
+**/datasets/
+**/models/
+
+# Temporary and cache directories
+**/tmp/
+**/temp/
+**/cache/
+**/.cache/

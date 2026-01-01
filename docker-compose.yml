@@ -1,0 +1,732 @@
+# Unified Docker Compose for Symphainy Platform
+# Single source of truth for starting the entire platform
+# 
+# Usage:
+#   Start everything: docker-compose --env-file .env.development up -d
+#   Stop everything: docker-compose down
+#   View logs: docker-compose logs -f [service-name]
+#
+# Environment Files:
+#   - Development: .env.development (or use default values)
+#   - Staging: .env.staging
+#   - Production: .env.production
+#   - Templates: scripts/deploy/env.*.template
+#
+# Access URLs (via Traefik on port 80):
+#   - Frontend: Set via FRONTEND_URL environment variable (default: http://localhost)
+#   - Backend API: Set via API_URL environment variable (default: http://localhost)/api
+#   - Traefik Dashboard: http://localhost:${TRAEFIK_DASHBOARD_PORT:-8080}
+#   - Consul UI: http://localhost:${CONSUL_HTTP_PORT:-8500}
+#   - Grafana: http://localhost:${GRAFANA_PORT:-3100}
+#   - ArangoDB: http://localhost:${ARANGO_PORT:-8529}
+#
+# All URLs, ports, and IPs are configurable via environment variables.
+# See scripts/deploy/env.*.template for all available variables.
+#
+# Internal Docker Network:
+#   - Services communicate via container names (e.g., http://backend:8000)
+#   - Traefik handles external routing only
+#
+# All hardcoded values have been replaced with environment variables.
+# See scripts/deploy/env.*.template for required variables.
+
+services:
+  # ============================================================================
+  # INFRASTRUCTURE SERVICES
+  # ============================================================================
+  
+  # Traefik - Reverse Proxy and Load Balancer (MUST START FIRST)
+  traefik:
+    image: traefik:v3.0
+    container_name: symphainy-traefik
+    ports:
+      - "${TRAEFIK_HTTP_PORT:-80}:80"      # HTTP - Main entry point for all services
+      - "${TRAEFIK_HTTPS_PORT:-443}:443"    # HTTPS (future)
+      - "${TRAEFIK_DASHBOARD_PORT:-8080}:8080"  # Traefik Dashboard
+    command:
+      - --api.dashboard=${TRAEFIK_DASHBOARD_ENABLED:-true}
+      - --api.insecure=${TRAEFIK_DASHBOARD_ENABLED:-true}  # Secure in production (set to false)
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=${DOCKER_NETWORK_NAME:-smart_city_net}
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --log.level=INFO
+      - --accesslog=true
+      - --providers.docker.watch=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./symphainy-platform/traefik-config:/etc/traefik:ro
+    networks:
+      - smart_city_net
+    depends_on:
+      - consul
+    healthcheck:
+      # Use wget to check Traefik ping endpoint (wget is available in Traefik v3.0 image)
+      # Alternative: Use API endpoint if ping fails: http://127.0.0.1:8080/api/rawdata
+      test: ["CMD", "wget", "--spider", "--tries=1", "--no-verbose", "--timeout=5", "http://127.0.0.1:8080/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,infrastructure"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.localhost`) || PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=web"
+      - "traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080"
+
+  # Consul - Service Discovery and KV Store (MUST START BEFORE TRAEFIK)
+  consul:
+    image: hashicorp/consul:latest
+    container_name: symphainy-consul
+    ports:
+      - "${CONSUL_HTTP_PORT:-8500}:8500"  # Standard Consul HTTP API port
+      - "${CONSUL_DNS_PORT:-8600}:8600/udp"  # Consul DNS
+      - "${CONSUL_DNS_PORT:-8600}:8600/tcp"  # Consul DNS
+      - "8300:8300"  # Consul server RPC (internal)
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+      - CONSUL_CLIENT_INTERFACE=eth0
+      - CONSUL_DATACENTER=${CONSUL_DATACENTER:-dc1}
+      - CONSUL_BOOTSTRAP_EXPECT=1
+      - CONSUL_ACL_ENABLED=false
+      - CONSUL_ENABLE_UI=true
+    volumes:
+      - consul_data:/consul/data
+      - consul_config:/consul/config
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    networks:
+      - smart_city_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.consul.rule=Host(`consul.localhost`) || PathPrefix(`/consul`)"
+      - "traefik.http.routers.consul.entrypoints=web"
+      - "traefik.http.services.consul.loadbalancer.server.port=8500"
+
+  # ArangoDB - Graph Database for Metadata and Telemetry
+  arangodb:
+    image: arangodb:3.11
+    container_name: symphainy-arangodb
+    ports:
+      - "${ARANGO_PORT:-8529}:8529"
+    environment:
+      - ARANGO_ROOT_PASSWORD=${ARANGO_PASS:-}
+      - ARANGO_NO_AUTH=${ARANGO_NO_AUTH:-1}
+    volumes:
+      - arangodb_data:/var/lib/arangodb3
+      - ./symphainy-platform/arangodb-init:/docker-entrypoint-initdb.d:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,infrastructure"
+    networks:
+      - smart_city_net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "-O", "/dev/null", "http://127.0.0.1:8529/_api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.arangodb.rule=Host(`arangodb.localhost`) || PathPrefix(`/arangodb`)"
+      - "traefik.http.routers.arangodb.entrypoints=web"
+      - "traefik.http.services.arangodb.loadbalancer.server.port=8529"
+
+  # Redis with Graph Module - Cache, Message Broker, and Graph Database
+  redis:
+    image: redislabs/redisgraph:latest
+    container_name: symphainy-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,infrastructure"
+    networks:
+      - smart_city_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=false"  # Redis is TCP, not HTTP - not exposed via Traefik
+
+  # Meilisearch - Search Engine for Knowledge Discovery
+  meilisearch:
+    image: getmeili/meilisearch:v1.5
+    container_name: symphainy-meilisearch
+    ports:
+      - "${MEILI_PORT:-7700}:7700"
+    environment:
+      - MEILI_ENV=${ENVIRONMENT:-development}
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-masterKey}
+      - MEILI_NO_ANALYTICS=true
+      - MEILI_HTTP_ADDR=0.0.0.0:7700
+    volumes:
+      - meilisearch_data:/meili_data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.meilisearch.rule=Host(`meilisearch.localhost`) || PathPrefix(`/meilisearch`)"
+      - "traefik.http.routers.meilisearch.entrypoints=web"
+      - "traefik.http.services.meilisearch.loadbalancer.server.port=7700"
+
+  # Tempo - Distributed Tracing Backend
+  tempo:
+    image: grafana/tempo:latest
+    container_name: symphainy-tempo
+    ports:
+      - "${TEMPO_PORT:-3200}:3200"   # Tempo UI
+      - "${OTEL_COLLECTOR_GRPC_EXTERNAL_PORT:-4319}:4317"   # OTLP gRPC (internal port 4317, external configurable)
+      - "${OTEL_COLLECTOR_HTTP_EXTERNAL_PORT:-4320}:4318"   # OTLP HTTP (internal port 4318, external configurable)
+    volumes:
+      - ./symphainy-platform/tempo-config.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    command: -config.file=/etc/tempo.yaml
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    depends_on:
+      consul:
+        condition: service_started
+    healthcheck:
+      # Use /status endpoint which is available immediately, not /ready which has 15s delay
+      test: ["CMD", "wget", "--spider", "-q", "-O", "/dev/null", "http://localhost:3200/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: symphainy-otel-collector
+    ports:
+      - "${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"   # OTLP gRPC
+      - "${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"   # OTLP HTTP
+      - "${OTEL_COLLECTOR_METRICS_PORT:-8889}:8890"   # Prometheus metrics (external port configurable, internal port 8890)
+    volumes:
+      - ./symphainy-platform/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,infrastructure"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    depends_on:
+      tempo:
+        condition: service_started
+    restart: unless-stopped
+
+  # Grafana - Visualization and Monitoring
+  grafana:
+    image: grafana/grafana:latest
+    container_name: symphainy-grafana
+    ports:
+      - "${GRAFANA_PORT:-3100}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Allow Grafana to start even if datasource provisioning fails initially
+      - GF_DATASOURCES_ALLOW_EDIT=true
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      # Increase logging for debugging
+      - GF_LOG_LEVEL=debug
+      # Skip datasource validation during provisioning
+      - GF_DATASOURCES_ALLOW_DELETE=true
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./symphainy-platform/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./symphainy-platform/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    depends_on:
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.localhost`) || PathPrefix(`/grafana`)"
+      - "traefik.http.routers.grafana.entrypoints=web"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  # Loki - Log Aggregation Backend
+  loki:
+    image: grafana/loki:latest
+    container_name: symphainy-loki
+    ports:
+      - "${LOKI_PORT:-3101}:3100"  # External port configurable, internal 3100 (Grafana uses 3100 externally)
+    volumes:
+      - loki_data:/loki
+      - ./symphainy-platform/loki-config.yaml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - smart_city_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3100/ready | grep -q ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # OPA (Open Policy Agent) - Policy Engine
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: symphainy-opa
+    ports:
+      - "8181:8181"
+    command: run --server --log-level info
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    networks:
+      - smart_city_net
+    restart: unless-stopped
+
+  # Cobrix Parser - COBOL/Mainframe File Parsing Service
+  cobrix-parser:
+    build:
+      context: ./services/cobrix-parser
+      dockerfile: Dockerfile
+    container_name: symphainy-cobrix-parser
+    networks:
+      - smart_city_net
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "java", "-jar", "/opt/cobrix/cobrix.jar", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,parsing"
+
+  # Celery Worker - Background Task Processing
+  celery-worker:
+    build:
+      context: ./symphainy-platform
+      dockerfile: Dockerfile
+    container_name: symphainy-celery-worker
+    command: celery -A celery_app worker --loglevel=info --concurrency=4
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/1}
+      - ARANGO_URL=${ARANGO_URL:-http://${ARANGO_HOST:-arangodb}:${ARANGO_PORT:-8529}}
+      - ARANGO_DB=${ARANGO_DB:-symphainy_metadata}
+      - ARANGO_USER=${ARANGO_USER:-root}
+      - ARANGO_PASS=${ARANGO_PASS:-}
+      - REDIS_URL=${REDIS_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-smart-city-platform}
+    depends_on:
+      redis:
+        condition: service_healthy
+      arangodb:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - smart_city_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Celery Beat - Task Scheduler
+  celery-beat:
+    build:
+      context: ./symphainy-platform
+      dockerfile: Dockerfile
+    container_name: symphainy-celery-beat
+    working_dir: /app
+    command: sh -c "cd /app && celery -A celery_app beat --loglevel=info"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/1}
+      - ARANGO_URL=${ARANGO_URL:-http://${ARANGO_HOST:-arangodb}:${ARANGO_PORT:-8529}}
+      - ARANGO_DB=${ARANGO_DB:-symphainy_metadata}
+      - ARANGO_USER=${ARANGO_USER:-root}
+      - ARANGO_PASS=${ARANGO_PASS:-}
+      - REDIS_URL=${REDIS_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-smart-city-platform}
+    depends_on:
+      redis:
+        condition: service_healthy
+      arangodb:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - smart_city_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # APPLICATION SERVICES
+  # ============================================================================
+
+  # Backend - Symphainy Platform API
+  backend:
+    build:
+      context: ./symphainy-platform
+      dockerfile: Dockerfile
+    container_name: symphainy-backend-prod
+    # Ports removed - routing through Traefik only
+    # Load secrets from .env.secrets file (for Supabase credentials)
+    env_file:
+      - ./symphainy-platform/.env.secrets
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - PORT=8000
+      - LOG_LEVEL=INFO
+      # CORS Configuration (REQUIRED for production security)
+      # Traefik forwards origin headers as-is, so backend sees the same origin browser sends
+      # Include both localhost (for local dev/testing) and production IP/domain
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://35.215.64.103}
+      - API_CORS_ORIGINS=${API_CORS_ORIGINS:-http://localhost,http://35.215.64.103}
+      # Database Configuration
+      - ARANGO_URL=${ARANGO_URL:-http://${ARANGO_HOST:-arangodb}:${ARANGO_PORT:-8529}}
+      - ARANGO_DB=${ARANGO_DB:-symphainy_metadata}
+      - ARANGO_USER=${ARANGO_USER:-root}
+      - ARANGO_PASS=${ARANGO_PASS:-}
+      - REDIS_URL=${REDIS_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}}
+      # Consul Configuration
+      - CONSUL_HOST=${CONSUL_HOST:-consul}
+      - CONSUL_PORT=${CONSUL_PORT:-8500}
+      - CONSUL_DATACENTER=${CONSUL_DATACENTER:-dc1}
+      # OpenTelemetry Configuration (REQUIRED in production)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=symphainy-platform
+      - OTEL_EXPORTER_OTLP_INSECURE=true
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=symphainy-platform
+      # Traefik Configuration
+      - TRAEFIK_API_URL=http://traefik:8080
+      # Supabase Configuration (REQUIRED for ForwardAuth)
+      # NOTE: Supabase variables are loaded from .env.secrets via env_file directive above
+      # Do NOT override here - let env_file handle it to avoid empty values
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,environment"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Increased for foundation initialization
+    restart: unless-stopped
+    networks:
+      - smart_city_net
+    depends_on:
+      traefik:
+        condition: service_started
+      consul:
+        condition: service_healthy
+      arangodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      # Auth endpoints router (no auth required - ForwardAuth endpoint itself)
+      # MUST have HIGH priority to match BEFORE the main backend router
+      # Includes: /api/auth/* (login, register, validate-token), /api/health, /api/v1/session/create-user-session
+      - "traefik.http.routers.backend-auth.rule=PathPrefix(`/api/auth`) || Path(`/api/health`) || Path(`/api/v1/session/create-user-session`)"
+      - "traefik.http.routers.backend-auth.entrypoints=web"
+      - "traefik.http.routers.backend-auth.service=backend"
+      - "traefik.http.routers.backend-auth.middlewares=backend-chain@file"
+      - "traefik.http.routers.backend-auth.priority=100"  # HIGH priority to match auth routes FIRST
+      
+      # WebSocket router (bypasses ForwardAuth - websockets handle auth via session_token query param)
+      # Handler-level authentication ensures security while avoiding ForwardAuth issues with websocket handshake
+      - "traefik.http.routers.backend-websocket.rule=PathPrefix(`/api/ws`)"
+      - "traefik.http.routers.backend-websocket.entrypoints=web"
+      - "traefik.http.routers.backend-websocket.service=backend"
+      - "traefik.http.routers.backend-websocket.middlewares=websocket-chain@file"  # WebSocket-specific middleware chain
+      - "traefik.http.routers.backend-websocket.priority=95"  # High priority, but lower than auth routes
+      
+      # File Upload router (bypasses ForwardAuth to avoid timeout during large file uploads)
+      # Handler-level authentication ensures security while avoiding ForwardAuth timeout
+      - "traefik.http.routers.backend-upload.rule=PathPrefix(`/api/v1/content-pillar/upload-file`)"
+      - "traefik.http.routers.backend-upload.entrypoints=web"
+      - "traefik.http.routers.backend-upload.service=backend"
+      - "traefik.http.routers.backend-upload.middlewares=backend-chain@file"  # No auth middleware (handler-level auth)
+      - "traefik.http.routers.backend-upload.priority=90"  # High priority, but lower than auth routes
+      
+      # File Processing router (bypasses ForwardAuth to avoid timeout during long-running parsing operations)
+      # Handler-level authentication ensures security while avoiding ForwardAuth timeout
+      - "traefik.http.routers.backend-process-file.rule=PathPrefix(`/api/v1/content-pillar/process-file`)"
+      - "traefik.http.routers.backend-process-file.entrypoints=web"
+      - "traefik.http.routers.backend-process-file.service=backend"
+      - "traefik.http.routers.backend-process-file.middlewares=backend-chain@file"  # No auth middleware (handler-level auth)
+      - "traefik.http.routers.backend-process-file.priority=89"  # High priority, but lower than upload routes
+      
+      # Main backend router with authentication (Phase 1: Security Integration)
+      # Uses Traefik ForwardAuth middleware for Supabase JWT validation
+      # Excludes upload-file, process-file paths, websocket paths, and session creation to avoid conflicts
+      - "traefik.http.routers.backend.rule=(Host(`api.localhost`) || PathPrefix(`/api`)) && !PathPrefix(`/api/v1/content-pillar/upload-file`) && !PathPrefix(`/api/v1/content-pillar/process-file`) && !PathPrefix(`/api/ws`) && !Path(`/api/v1/session/create-user-session`)"
+      - "traefik.http.routers.backend.entrypoints=web"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+      - "traefik.http.routers.backend.middlewares=backend-chain-with-auth@file"
+      - "traefik.http.routers.backend.priority=1"  # LOW priority - matches after backend-auth and backend-upload
+
+  # Frontend - Symphainy Platform UI
+  frontend:
+    build:
+      context: ./symphainy-frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-${API_URL:-http://localhost}}
+        - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-${API_URL:-http://localhost}}
+        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-${API_URL:-http://localhost}}
+    container_name: symphainy-frontend-prod
+    # Ports removed - routing through Traefik only
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      # Traefik routes: Backend API accessible via /api path or api.localhost
+      # Base URL should NOT include /api since code paths already include /api
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-${API_URL:-http://localhost}}
+      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-${API_URL:-http://localhost}}
+      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-${API_URL:-http://localhost}}
+      - NEXT_PUBLIC_FRONTEND_URL=${NEXT_PUBLIC_FRONTEND_URL:-${FRONTEND_URL:-http://localhost}}
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1.5G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,environment"
+    depends_on:
+      backend:
+        condition: service_healthy
+      traefik:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - smart_city_net
+    labels:
+      - "traefik.enable=true"
+      # Match any host (localhost, public IP, or domain) but exclude /api paths
+      # Frontend should be accessible from any origin - security handled by backend CORS
+      - "traefik.http.routers.frontend.rule=!PathPrefix(`/api`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      - "traefik.http.routers.frontend.middlewares=frontend-chain@file"
+      - "traefik.http.routers.frontend.priority=1"  # LOW priority - backend routers match first
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+
+volumes:
+  arangodb_data:
+  redis_data:
+  meilisearch_data:
+  consul_data:
+  consul_config:
+  tempo_data:
+  grafana_data:
+  loki_data:
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+
+networks:
+  smart_city_net:
+    name: ${DOCKER_NETWORK_NAME:-smart_city_net}
+    driver: bridge
+

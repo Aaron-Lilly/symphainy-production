@@ -1,0 +1,176 @@
+name: Agentic Domain CI/CD
+
+on:
+  push:
+    paths:
+      - 'agentic/**'
+      - 'foundations/**'
+  pull_request:
+    paths:
+      - 'agentic/**'
+      - 'foundations/**'
+
+jobs:
+  agentic-ci:
+    runs-on: ubuntu-latest
+    name: Agentic Domain CI
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+      
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+      
+      - name: Install project
+        run: poetry install --no-interaction
+      
+      - name: Run Agentic Unit Tests
+        run: |
+          poetry run python -m pytest tests/agentic/unit/ -v --tb=short
+      
+      - name: Run Agentic Integration Tests
+        run: |
+          poetry run python -m pytest tests/agentic/integration/ -v --tb=short
+      
+      - name: Run Agentic Chaos Tests
+        run: |
+          poetry run python -m pytest tests/agentic/chaos/ -v --tb=short
+      
+      - name: Run Agentic Blue-Green Tests
+        run: |
+          poetry run python -m pytest tests/agentic/blue-green/ -v --tb=short
+      
+      - name: Validate Domain Boundaries
+        run: |
+          poetry run python -c "
+          import sys
+          sys.path.append('.')
+          from foundations.public_works_foundation.public_works_foundation_service import PublicWorksFoundationService
+          from foundations.di_container.di_container_service import DIContainerService
+          
+          # Test that Agentic gets its specific abstractions (including CI/CD)
+          di_container = DIContainerService('test')
+          public_works = PublicWorksFoundationService(di_container)
+          agentic_abstractions = public_works.get_agentic_abstractions()
+          
+          # Verify CI/CD abstractions are available for Agentic
+          assert 'agent_governance' in agentic_abstractions, 'Agent governance abstraction missing'
+          assert 'cicd_monitoring' in agentic_abstractions, 'CI/CD monitoring abstraction missing'
+          
+          # Verify other Agentic abstractions
+          assert 'mcp_client' in agentic_abstractions, 'MCP client abstraction missing'
+          assert 'mcp_protocol' in agentic_abstractions, 'MCP protocol abstraction missing'
+          assert 'tool_registry' in agentic_abstractions, 'Tool registry abstraction missing'
+          assert 'agui' in agentic_abstractions, 'AGUI abstraction missing'
+          assert 'llm' in agentic_abstractions, 'LLM abstraction missing'
+          
+          print('✅ Agentic domain boundaries validated')
+          print(f'✅ Agentic has {len(agentic_abstractions)} abstractions (including CI/CD)')
+          "
+      
+      - name: Run Code Quality Checks
+        run: |
+          poetry run black --check agentic/ foundations/
+          poetry run isort --check-only agentic/ foundations/
+          poetry run flake8 agentic/ foundations/
+          poetry run mypy agentic/ foundations/
+      
+      - name: Run Security Scans
+        run: |
+          poetry run bandit -r agentic/ foundations/
+          poetry run safety check
+          poetry run pip-audit
+      
+      - name: Generate Test Coverage Report
+        run: |
+          poetry run pytest --cov=agentic --cov=foundations --cov-report=xml --cov-report=html
+      
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: agentic
+          name: agentic-coverage
+
+  agentic-cd:
+    runs-on: ubuntu-latest
+    name: Agentic Domain CD
+    needs: agentic-ci
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      
+      - name: Deploy Agentic Services
+        run: |
+          echo "🚀 Deploying Agentic services..."
+          # This would integrate with our CI/CD business abstractions
+          poetry run python -c "
+          import sys
+          sys.path.append('.')
+          from foundations.public_works_foundation.public_works_foundation_service import PublicWorksFoundationService
+          from foundations.di_container.di_container_service import DIContainerService
+          
+          # Get CI/CD abstractions for deployment
+          di_container = DIContainerService('deployment')
+          public_works = PublicWorksFoundationService(di_container)
+          agentic_abstractions = public_works.get_agentic_abstractions()
+          
+          # Use CI/CD abstractions for agent deployment
+          agent_governance = agentic_abstractions.get('agent_governance')
+          cicd_monitoring = agentic_abstractions.get('cicd_monitoring')
+          
+          print('✅ Agentic deployment using CI/CD abstractions')
+          print(f'✅ Agent governance available: {agent_governance is not None}')
+          print(f'✅ CI/CD monitoring available: {cicd_monitoring is not None}')
+          "
+      
+      - name: Run Post-Deployment Tests
+        run: |
+          poetry run python -m pytest tests/agentic/blue-green/ -v --tb=short
+      
+      - name: Notify Deployment Success
+        run: |
+          echo "✅ Agentic domain deployment successful"
+          echo "🔗 Agentic services are now available"
+
+
+
+

@@ -1,0 +1,96 @@
+# SymphAIny Platform - Production Dependencies
+# Core web framework
+fastapi==0.115.0
+uvicorn[standard]==0.31.1
+pydantic>=2.7.0,<3.0.0
+pydantic-settings>=2.5.2
+
+# MCP (Micro-Capability Platform)
+mcp==1.13.1
+pydantic-extra-types==2.1.0
+email-validator==2.1.0
+python-multipart==0.0.9
+
+# File handling
+aiofiles==23.2.1
+
+# HTTP client
+httpx==0.27.2
+
+# Database and caching
+redis==5.0.0
+python-consul==1.1.0
+
+# Authentication and security
+supabase==2.17.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+PyJWT==2.8.0
+cryptography==41.0.0
+
+# Logging and monitoring
+structlog==23.2.0
+prometheus-client==0.19.0
+
+# Configuration
+python-dotenv==1.0.0
+
+# OpenTelemetry (observability) - All aligned to SDK 1.20.0 (requires semantic-conventions 0.41b0)
+opentelemetry-api==1.20.0
+opentelemetry-sdk==1.20.0
+opentelemetry-instrumentation==0.41b0
+opentelemetry-instrumentation-fastapi==0.41b0
+opentelemetry-instrumentation-requests==0.41b0
+opentelemetry-exporter-otlp==1.20.0
+
+# Tempo (distributed tracing)
+tempo==0.12
+
+# Financial Analysis Libraries (Required for Business Outcomes Pillar)
+pandas==2.0.0
+scipy==1.11.0
+matplotlib==3.7.0
+seaborn==0.12.0
+
+# AI/ML Libraries (Required for HuggingFace Adapters)
+transformers==4.35.0
+torch==2.1.0
+tokenizers>=0.14,<0.15
+
+# LLM Provider SDKs (Required for LLM Abstractions)
+openai>=1.0.0  # Required for OpenAI adapter
+anthropic>=0.18.0  # Required for Anthropic adapter
+
+# Document Processing Libraries
+python-docx==0.8.11  # Required for DOCX parsing
+# striprtf==0.0.26  # Optional - RTF support
+
+# PDF Processing Libraries (Already Available)
+PyPDF2==3.0.0  # Required for PDF text extraction
+pdfplumber==0.9.0  # Required for PDF table extraction
+# tabula-py==2.5.0  # Already in platform
+
+# Image Processing Libraries (Missing - Need to Add)
+pytesseract==0.3.10
+Pillow==10.0.0
+opencv-python==4.8.0.76
+numpy==1.24.0
+beautifulsoup4==4.12.0
+reportlab>=4.0.0  # For PDF test file creation (already in pyproject.toml)
+openpyxl>=3.1.0  # Required for Excel parsing
+
+# Advanced Format Conversion (Full Feature Parity)
+pyarrow==12.0.0
+
+# COBOL Processing Libraries (Future State - Commented Out)
+# pyspark==3.4.0
+# cobrix==0.1.0
+
+# System Monitoring
+psutil==5.9.0
+
+# Database Libraries
+asyncpg==0.28.0
+meilisearch==0.27.0
+python-arango==7.8.1

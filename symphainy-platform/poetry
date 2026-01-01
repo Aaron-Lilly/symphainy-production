@@ -1,0 +1,4 @@
+#!/bin/bash
+# Local Poetry wrapper script
+python3 ./poetry_lib/bin/poetry "$@"
+

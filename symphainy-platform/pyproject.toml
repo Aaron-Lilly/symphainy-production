@@ -1,0 +1,154 @@
+[tool.poetry]
+name = "symphainy-platform"
+version = "0.1.0"
+description = "SymphAIny Smart Cities Platform"
+authors = ["SymphAIny Team <team@symphainy.com>"]
+readme = "README.md"
+packages = [
+    {include = "backend"},
+    {include = "foundations"}, 
+    {include = "bases"},
+    {include = "core"},
+    {include = "utilities"},
+    {include = "experience"},
+    {include = "agentic"},
+    {include = "journey_solution"}
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.31.1"}
+pydantic = "^2.7.0"
+pydantic-settings = "^2.5.2"
+mcp = "^1.13.1"
+pydantic-extra-types = "^2.1.0"
+email-validator = "^2.1.0"
+python-multipart = "^0.0.9"
+aiofiles = "^23.2.1"
+httpx = "^0.27.2"
+redis = "^5.0.0"
+python-consul = "^1.1.0"
+supabase = "^2.17.0"
+# Note: gotrue removed - Supabase client handles auth internally
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+# Google Cloud Storage dependencies
+google-cloud-storage = "^2.10.0"
+google-auth = "^2.23.0"
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+bcrypt = "^4.0.1"
+PyJWT = "^2.8.0"
+structlog = "^23.2.0"
+prometheus-client = "^0.19.0"
+python-dotenv = "^1.0.0"
+opentelemetry-api = "^1.20.0"
+opentelemetry-sdk = "^1.20.0"
+opentelemetry-instrumentation = "^0.42b0"
+opentelemetry-instrumentation-fastapi = "^0.42b0"
+opentelemetry-instrumentation-requests = "^0.42b0"
+opentelemetry-instrumentation-logging = "^0.42b0"
+opentelemetry-exporter-otlp = "^1.20.0"
+tempo = "^0.12"
+cryptography = "^41.0.0"
+
+# Financial Analysis Libraries (Required for Business Outcomes Pillar)
+pandas = "^2.0.0"
+scipy = "^1.11.0"
+matplotlib = "^3.7.0"
+seaborn = "^0.12.0"
+
+# AI/ML Libraries (Required for HuggingFace Adapters)
+# Note: torch is optional for Celery workers - can be installed separately if needed
+transformers = "^4.35.0"
+# torch = "^2.1.0"  # Commented out for Celery - install separately if GPU needed
+tokenizers = "^0.15.0"
+
+# Document Processing Libraries
+python-docx = "^0.8.11"  # Required for DOCX parsing
+# striprtf = "^0.0.26"  # Optional - RTF support
+
+# PDF Processing Libraries
+PyPDF2 = "^3.0.0"  # Required for PDF text extraction
+pdfplumber = "^0.9.0"  # Required for PDF table extraction
+# tabula-py = "^2.5.0"  # Optional - Java-based table extraction
+
+# Image Processing Libraries (Missing - Need to Add)
+pytesseract = "^0.3.10"
+Pillow = "^10.0.0"
+opencv-python = "^4.8.0.76"
+numpy = "^1.24.0"
+beautifulsoup4 = "^4.12.0"
+reportlab = "^4.0.0"
+openpyxl = "^3.1.0"  # Required for Excel parsing
+
+# Advanced Format Conversion (Full Feature Parity)
+pyarrow = "^12.0.0"  # For Parquet support
+
+# COBOL Processing Libraries (Future State - Commented Out)
+# pyspark = "^3.4.0"
+# cobrix = "^0.1.0"
+
+# System Monitoring
+psutil = "^5.9.0"
+
+# Database Libraries
+asyncpg = "^0.28.0"
+meilisearch = "^0.27.0"
+python-arango = "^7.8.1"
+
+# Task Queue (Celery)
+celery = {extras = ["redis"], version = "^5.3.0"}
+plotly = "^6.5.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-asyncio = "^0.21.0"
+pytest-cov = "^4.0.0"
+pytest-mock = "^3.10.0"
+pytest-xdist = "^3.3.0"
+black = "^23.0.0"
+isort = "^5.12.0"
+flake8 = "^6.0.0"
+mypy = "^1.5.0"
+mock = "^5.0.0"
+pylint = "^3.3.9"
+bandit = "^1.8.6"
+safety = "^3.6.2"
+pip-audit = "^2.9.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+profile = "black"
+known_first_party = ["symphainy", "backend", "common", "orchestration", "experience"]
+python_version = "3.10"
+
+[tool.isort]
+profile = "black"
+known_first_party = ["symphainy", "backend", "common", "orchestration", "experience"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--verbose", 
+    "--tb=short",
+    "--cov=.",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml"
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "e2e: End-to-end tests", 
+    "slow: Slow running tests",
+    "real_infrastructure: Tests that require real infrastructure (Redis, ArangoDB, etc.)"
+]

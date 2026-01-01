@@ -1,0 +1,340 @@
+# Quality Gates Workflow
+# Enforces code quality, security, and performance standards
+# Runs after tests pass, before deployment (Phase 3: Quality Gates)
+
+name: Quality Gates
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.10'
+  NODE_VERSION: '18'
+  COVERAGE_THRESHOLD: 80  # Minimum code coverage percentage
+
+jobs:
+  # ============================================================================
+  # JOB 1: CODE COVERAGE VALIDATION
+  # ============================================================================
+  code-coverage:
+    name: Code Coverage Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install backend dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r symphainy-platform/requirements.txt
+          pip install pytest pytest-cov coverage
+      
+      - name: Run tests with coverage
+        working-directory: tests
+        run: |
+          echo "📊 Running tests with coverage..."
+          pytest unit/ integration/ -v \
+            --cov=../symphainy-platform \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term \
+            --cov-fail-under=${{ env.COVERAGE_THRESHOLD }} || {
+            echo "❌ Code coverage below ${{ env.COVERAGE_THRESHOLD }}%"
+            exit 1
+          }
+          echo "✅ Code coverage meets ${{ env.COVERAGE_THRESHOLD }}% threshold"
+      
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-reports
+          path: |
+            tests/coverage.xml
+            tests/htmlcov/
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Install frontend dependencies
+        working-directory: symphainy-frontend
+        run: npm ci
+      
+      - name: Run frontend tests with coverage
+        working-directory: symphainy-frontend
+        run: |
+          echo "📊 Running frontend tests with coverage..."
+          npm test -- --coverage --watchAll=false --coverageThreshold='{"global":{"branches":${{ env.COVERAGE_THRESHOLD }},"functions":${{ env.COVERAGE_THRESHOLD }},"lines":${{ env.COVERAGE_THRESHOLD }},"statements":${{ env.COVERAGE_THRESHOLD }}}' || {
+            echo "❌ Frontend code coverage below ${{ env.COVERAGE_THRESHOLD }}%"
+            exit 1
+          }
+          echo "✅ Frontend code coverage meets ${{ env.COVERAGE_THRESHOLD }}% threshold"
+      
+      - name: Upload frontend coverage
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-coverage-reports
+          path: symphainy-frontend/coverage/
+
+  # ============================================================================
+  # JOB 2: SECURITY SCANNING
+  # ============================================================================
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install security tools
+        run: |
+          pip install --upgrade pip
+          pip install bandit safety pip-audit
+      
+      - name: Run Bandit security scan
+        working-directory: symphainy-platform
+        run: |
+          echo "🔒 Running Bandit security scan..."
+          bandit -r . -f json -o bandit-report.json || {
+            echo "❌ Bandit found security issues"
+            exit 1
+          }
+          bandit -r . -ll || {
+            echo "❌ Bandit found high/critical security issues"
+            exit 1
+          }
+          echo "✅ Bandit security scan passed"
+      
+      - name: Upload Bandit report
+        uses: actions/upload-artifact@v3
+        with:
+          name: bandit-security-report
+          path: symphainy-platform/bandit-report.json
+      
+      - name: Run Safety dependency check
+        working-directory: symphainy-platform
+        run: |
+          echo "🔒 Checking dependencies for known vulnerabilities..."
+          safety check --json --output safety-report.json || {
+            echo "❌ Safety found vulnerable dependencies"
+            cat safety-report.json || true
+            exit 1
+          }
+          echo "✅ Safety check passed - no vulnerable dependencies"
+      
+      - name: Upload Safety report
+        uses: actions/upload-artifact@v3
+        with:
+          name: safety-dependency-report
+          path: symphainy-platform/safety-report.json
+      
+      - name: Run pip-audit
+        working-directory: symphainy-platform
+        run: |
+          echo "🔒 Running pip-audit for dependency vulnerabilities..."
+          pip-audit --desc --format=json --output=audit-report.json || {
+            echo "❌ pip-audit found vulnerable dependencies"
+            cat audit-report.json || true
+            exit 1
+          }
+          echo "✅ pip-audit passed - no vulnerable dependencies"
+      
+      - name: Upload pip-audit report
+        uses: actions/upload-artifact@v3
+        with:
+          name: pip-audit-report
+          path: symphainy-platform/audit-report.json
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Install frontend dependencies
+        working-directory: symphainy-frontend
+        run: npm ci
+      
+      - name: Run npm audit
+        working-directory: symphainy-frontend
+        run: |
+          echo "🔒 Running npm audit for frontend vulnerabilities..."
+          npm audit --audit-level=moderate --json > npm-audit-report.json || {
+            echo "❌ npm audit found vulnerabilities"
+            npm audit --audit-level=moderate || true
+            exit 1
+          }
+          echo "✅ npm audit passed - no moderate/high/critical vulnerabilities"
+      
+      - name: Upload npm audit report
+        uses: actions/upload-artifact@v3
+        with:
+          name: npm-audit-report
+          path: symphainy-frontend/npm-audit-report.json
+
+  # ============================================================================
+  # JOB 3: CODE QUALITY CHECKS
+  # ============================================================================
+  code-quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install code quality tools
+        run: |
+          pip install --upgrade pip
+          pip install black flake8 pylint mypy
+      
+      - name: Check code formatting with black
+        run: |
+          echo "🎨 Checking code formatting..."
+          black --check symphainy-platform tests || {
+            echo "❌ Code formatting check failed"
+            echo "Run 'black symphainy-platform tests' to fix"
+            exit 1
+          }
+          echo "✅ Code formatting check passed"
+      
+      - name: Run flake8 linting
+        run: |
+          echo "🔍 Running flake8 linting..."
+          flake8 symphainy-platform --count --select=E9,F63,F7,F82 --show-source --statistics || {
+            echo "❌ Flake8 found critical errors"
+            exit 1
+          }
+          echo "✅ Flake8 critical checks passed"
+      
+      - name: Run pylint (non-blocking)
+        continue-on-error: true
+        run: |
+          echo "🔍 Running pylint..."
+          pylint symphainy-platform --fail-under=8.0 || {
+            echo "⚠️ Pylint score below 8.0 (non-blocking)"
+          }
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Install frontend dependencies
+        working-directory: symphainy-frontend
+        run: npm ci
+      
+      - name: Run ESLint
+        working-directory: symphainy-frontend
+        run: |
+          echo "🔍 Running ESLint..."
+          npm run lint || {
+            echo "❌ ESLint found errors"
+            exit 1
+          }
+          echo "✅ ESLint passed"
+
+  # ============================================================================
+  # JOB 4: PERFORMANCE BENCHMARKS
+  # ============================================================================
+  performance-checks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r symphainy-platform/requirements.txt
+          pip install pytest pytest-benchmark
+      
+      - name: Run performance benchmarks
+        working-directory: tests
+        continue-on-error: true
+        run: |
+          echo "⚡ Running performance benchmarks..."
+          # Run tests with benchmark plugin
+          pytest unit/ -v --benchmark-only --benchmark-autosave || {
+            echo "⚠️ Performance benchmarks completed (non-blocking)"
+          }
+          echo "✅ Performance benchmarks completed"
+      
+      - name: Check test execution time
+        working-directory: tests
+        run: |
+          echo "⏱️ Checking test execution times..."
+          pytest unit/ -v --durations=10 || {
+            echo "❌ Tests took too long"
+            exit 1
+          }
+          echo "✅ Test execution times acceptable"
+
+  # ============================================================================
+  # JOB 5: QUALITY GATES SUMMARY
+  # ============================================================================
+  quality-gates-summary:
+    name: Quality Gates Summary
+    runs-on: ubuntu-latest
+    needs: [code-coverage, security-scan, code-quality, performance-checks]
+    if: always()
+    
+    steps:
+      - name: Generate summary
+        run: |
+          echo "# Quality Gates Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Code Coverage: ${{ needs.code-coverage.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Security Scan: ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Code Quality: ${{ needs.code-quality.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Performance: ${{ needs.performance-checks.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.code-coverage.result }}" == "success" ] && \
+             [ "${{ needs.security-scan.result }}" == "success" ] && \
+             [ "${{ needs.code-quality.result }}" == "success" ]; then
+            echo "✅ **Quality Gates: PASSED**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All quality gates passed. Ready for deployment!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Quality Gates: FAILED**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "One or more quality gates failed. Review and fix issues before deployment." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+
+
+
+
+

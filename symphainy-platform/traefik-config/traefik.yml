@@ -1,0 +1,34 @@
+# Traefik Configuration
+# This file provides static configuration for Traefik
+# Dynamic configuration is handled via Docker labels
+
+api:
+  dashboard: true
+  insecure: true  # Secure in production with authentication
+
+entryPoints:
+  web:
+    address: ":80"
+    # Increase timeouts for file uploads
+    transport:
+      respondingTimeouts:
+        readTimeout: 600s      # 10 minutes for large file processing
+        writeTimeout: 600s     # 10 minutes for large file processing
+        idleTimeout: 300s      # 5 minutes idle timeout
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: smart_city_net
+    watch: true
+  file:
+    filename: /etc/traefik/middlewares.yml
+    watch: true
+
+log:
+  level: INFO
+
+accessLog: {}

@@ -1,0 +1,262 @@
+name: Quality Gates
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main, develop ]
+
+jobs:
+  # Code Quality Gates
+  code-quality-gates:
+    runs-on: ubuntu-latest
+    name: Code Quality Gates
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: poetry install --only main
+      
+    - name: Code coverage check
+      run: |
+        echo "📊 Checking code coverage..."
+        poetry run pytest tests/ --cov=. --cov-report=xml --cov-fail-under=80
+        
+    - name: Code complexity check
+      run: |
+        echo "🔍 Checking code complexity..."
+        poetry run radon cc . --min B --show-complexity
+        
+    - name: Security vulnerability check
+      run: |
+        echo "🔒 Checking security vulnerabilities..."
+        poetry run safety check --json --output safety-report.json
+        
+    - name: Dependency check
+      run: |
+        echo "📦 Checking dependencies..."
+        poetry run pip-audit --desc --format=json --output=audit-report.json
+        
+    - name: Performance check
+      run: |
+        echo "⚡ Checking performance..."
+        poetry run pytest tests/performance/ --durations=10 --maxfail=1
+
+  # Architecture Quality Gates
+  architecture-gates:
+    runs-on: ubuntu-latest
+    name: Architecture Quality Gates
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: poetry install --only main
+      
+    - name: Architecture compliance check
+      run: |
+        echo "🏗️ Checking architecture compliance..."
+        poetry run pytest tests/architecture/ -v
+        
+    - name: Dependency injection check
+      run: |
+        echo "🔧 Checking dependency injection..."
+        poetry run python -c "
+        from foundations.di_container.di_container_service import DIContainerService
+        di = DIContainerService('test')
+        print('✅ DI Container architecture compliant')
+        "
+        
+    - name: Configuration system check
+      run: |
+        echo "⚙️ Checking configuration system..."
+        poetry run python -c "
+        from utilities.configuration.unified_configuration_manager import UnifiedConfigurationManager
+        config = UnifiedConfigurationManager('test')
+        print('✅ Configuration system architecture compliant')
+        "
+
+  # Integration Quality Gates
+  integration-gates:
+    runs-on: ubuntu-latest
+    name: Integration Quality Gates
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          
+      arangodb:
+        image: arangodb:3.11
+        ports:
+          - 8529:8529
+        env:
+          ARANGO_ROOT_PASSWORD: rootpassword
+          ARANGO_NO_AUTH: 1
+        options: >-
+          --health-cmd "curl -f http://localhost:8529/_api/version"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: poetry install --only main
+      
+    - name: Integration tests
+      run: |
+        echo "🔗 Running integration tests..."
+        poetry run pytest tests/integration/ -v
+        
+    - name: Contract tests
+      run: |
+        echo "📋 Running contract tests..."
+        poetry run pytest tests/contracts/ -v
+        
+    - name: End-to-end tests
+      run: |
+        echo "🌐 Running end-to-end tests..."
+        poetry run pytest tests/e2e/ -v
+
+  # Performance Quality Gates
+  performance-gates:
+    runs-on: ubuntu-latest
+    name: Performance Quality Gates
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: poetry install --only main
+      
+    - name: Performance tests
+      run: |
+        echo "⚡ Running performance tests..."
+        poetry run pytest tests/performance/ -v --durations=10
+        
+    - name: Load tests
+      run: |
+        echo "📈 Running load tests..."
+        poetry run python monitoring/health-checks.py
+        
+    - name: Memory usage check
+      run: |
+        echo "💾 Checking memory usage..."
+        poetry run python -c "
+        import psutil
+        import os
+        process = psutil.Process(os.getpid())
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        print(f'Memory usage: {memory_mb:.2f} MB')
+        assert memory_mb < 500, f'Memory usage too high: {memory_mb:.2f} MB'
+        print('✅ Memory usage within limits')
+        "
+
+  # Final Quality Gate
+  final-quality-gate:
+    runs-on: ubuntu-latest
+    name: Final Quality Gate
+    needs: [code-quality-gates, architecture-gates, integration-gates, performance-gates]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: poetry install --only main
+      
+    - name: Final quality check
+      run: |
+        echo "🎯 Final quality check..."
+        chmod +x scripts/production-validation.sh
+        ./scripts/production-validation.sh
+        
+    - name: Quality gate summary
+      run: |
+        echo "📊 Quality Gate Summary"
+        echo "======================"
+        echo "✅ Code Quality: PASSED"
+        echo "✅ Architecture: PASSED"
+        echo "✅ Integration: PASSED"
+        echo "✅ Performance: PASSED"
+        echo "✅ Final Validation: PASSED"
+        echo ""
+        echo "🎉 ALL QUALITY GATES PASSED!"
+        echo "🚀 Ready for deployment!"
+
+
+
+

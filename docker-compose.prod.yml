@@ -1,0 +1,105 @@
+# Docker Compose for Production-like Local Testing
+# Use this to test your production containers locally before deploying
+
+# Docker Compose for Production Deployment
+# Standardized network architecture: All services on smart_city_net
+
+services:
+  backend:
+    build:
+      context: ./symphainy-platform
+      dockerfile: Dockerfile
+    container_name: symphainy-backend-prod
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - PORT=8000
+      - LOG_LEVEL=INFO
+      # OpenTelemetry Configuration (REQUIRED in production)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=symphainy-platform
+      - OTEL_EXPORTER_OTLP_INSECURE=true
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=symphainy-platform
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,environment"
+    healthcheck:
+      # Use Python-based health check (curl may not be available)
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Increased for foundation initialization
+    restart: unless-stopped
+    networks:
+      - smart_city_net
+
+  frontend:
+    build:
+      context: ./symphainy-frontend
+      dockerfile: Dockerfile
+    container_name: symphainy-frontend-prod
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_BACKEND_URL=http://35.215.64.103:8000
+      - NEXT_PUBLIC_API_BASE=http://35.215.64.103:8000
+      - PORT=3000
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1.5G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,environment"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # Use wget for Node.js image (more reliable than curl)
+      # wget returns 0 on success, non-zero on failure
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - smart_city_net
+
+networks:
+  # Use infrastructure network for all services
+  # Network is created by docker-compose.infrastructure.yml
+  smart_city_net:
+    external: true
+    name: symphainy-platform_smart_city_net
+
+# Usage:
+# 1. Test locally: docker-compose -f docker-compose.prod.yml up --build
+# 2. Access frontend: http://localhost:3000
+# 3. Access backend: http://localhost:8000
+# 4. Stop: docker-compose -f docker-compose.prod.yml down
+
+
+
+

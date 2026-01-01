@@ -1,0 +1,88 @@
+# Test Infrastructure Stack for Symphainy Platform
+# Provides real infrastructure containers for integration testing
+# Usage: docker-compose -f tests/docker-compose.test.yml up -d
+
+version: '3.8'
+
+services:
+  # Redis - Cache and Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: symphainy-test-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - test_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: "no"
+
+  # ArangoDB - Graph Database for Metadata
+  arangodb:
+    image: arangodb:3.11
+    container_name: symphainy-test-arangodb
+    ports:
+      - "8529:8529"
+    environment:
+      - ARANGO_ROOT_PASSWORD=testpassword
+      - ARANGO_NO_AUTH=1
+    networks:
+      - test_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8529/_api/version"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    restart: "no"
+
+  # Meilisearch - Search Engine
+  meilisearch:
+    image: getmeili/meilisearch:v1.5
+    container_name: symphainy-test-meilisearch
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_ENV=development
+      - MEILI_MASTER_KEY=testmasterkey
+      - MEILI_NO_ANALYTICS=true
+      - MEILI_HTTP_ADDR=0.0.0.0:7700
+    networks:
+      - test_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: "no"
+
+  # Consul - Service Discovery
+  consul:
+    image: hashicorp/consul:latest
+    container_name: symphainy-test-consul
+    ports:
+      - "8500:8500"
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+      - CONSUL_DATACENTER=dc1
+      - CONSUL_BOOTSTRAP_EXPECT=1
+      - CONSUL_ACL_ENABLED=false
+      - CONSUL_ENABLE_UI=true
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
+    networks:
+      - test_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    restart: "no"
+
+networks:
+  test_net:
+    driver: bridge

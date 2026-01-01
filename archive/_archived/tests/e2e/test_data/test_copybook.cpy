@@ -1,0 +1,9 @@
+
+        01 CUSTOMER-RECORD.
+           05 CUSTOMER-ID PIC 9(10).
+           05 CUSTOMER-NAME PIC X(50).
+           05 CUSTOMER-EMAIL PIC X(100).
+           05 CUSTOMER-BALANCE PIC 9(10)V99.
+           05 LAST-PAYMENT-DATE PIC 9(8).
+           05 CUSTOMER-STATUS PIC X(10).
+        

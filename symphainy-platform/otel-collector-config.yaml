@@ -1,0 +1,50 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  # OTLP log receiver (simpler than filelog - no file access needed)
+  # Applications can send logs via OTLP HTTP/gRPC
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  memory_limiter:
+    limit_mib: 512
+    check_interval: 1s
+  # Resource processor for log enrichment
+  resource:
+    attributes:
+      - key: service.namespace
+        value: "symphainy-platform"
+        action: insert
+
+exporters:
+  otlp:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  debug:
+    verbosity: detailed
+  prometheus:
+    endpoint: "0.0.0.0:8890"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus, debug]
+    # Logs pipeline - receives logs via OTLP and exports to Tempo and debug
+    # Note: For Loki integration, we can add Promtail later to scrape logs from Tempo or use a different approach
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp, debug]

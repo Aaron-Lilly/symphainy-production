@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""
+Experience Manager Service - Initialization Module
+
+Micro-module for Experience Manager service initialization with proper infrastructure connections.
+"""
+
+import logging
+from typing import Any
+
+
+class Initialization:
+    """Initialization module for Experience Manager service."""
+    
+    def __init__(self, service: Any):
+        """Initialize with service instance."""
+        self.service = service
+        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+    
+    async def initialize_infrastructure_connections(self):
+        """Initialize infrastructure connections using mixin methods."""
+        try:
+            if hasattr(self.service, 'logger') and self.service.logger:
+                self.service.logger.info("🔌 Connecting to Public Works infrastructure abstractions...")
+            
+            # Get Public Works Foundation from DI Container
+            public_works_foundation = self.service.di_container.get_foundation_service("PublicWorksFoundationService")
+            if not public_works_foundation:
+                raise Exception("Public Works Foundation not available")
+            
+            # Experience Manager should use Smart City services (Traffic Cop) for session/state management
+            # NOT direct infrastructure abstractions (architectural pattern to prevent spaghetti code)
+            # Session and state management will be handled via Traffic Cop SOA API (discovered below)
+            # We don't set session_abstraction or state_management_abstraction directly
+            if hasattr(self.service, 'logger') and self.service.logger:
+                self.service.logger.info("ℹ️ Session and state management will be handled via Traffic Cop service")
+            
+            # Discover Smart City services via Curator for business-level operations
+            if hasattr(self.service, 'logger') and self.service.logger:
+                self.service.logger.info("🔍 Discovering Smart City services via Curator...")
+            
+            # Security Guard - User authentication for experiences
+            self.service.security_guard = await self.service.get_security_guard_api()
+            if not self.service.security_guard and hasattr(self.service, 'logger') and self.service.logger:
+                self.service.logger.warning("⚠️ Security Guard service not available")
+            
+            # Traffic Cop - Session routing, UI state sync
+            self.service.traffic_cop = await self.service.get_traffic_cop_api()
+            if not self.service.traffic_cop and hasattr(self.service, 'logger') and self.service.logger:
+                self.service.logger.warning("⚠️ Traffic Cop service not available")
+            
+            # Post Office - Real-time messaging
+            self.service.post_office = await self.service.get_post_office_api()
+            if not self.service.post_office and hasattr(self.service, 'logger') and self.service.logger:
+                self.service.logger.warning("⚠️ Post Office service not available")
+            
+            self.service.is_infrastructure_connected = True
+            
+            if hasattr(self.service, 'logger') and self.service.logger:
+                self.service.logger.info("✅ Infrastructure connections established")
+            
+        except Exception as e:
+            if hasattr(self.service, 'logger') and self.service.logger:
+                self.service.logger.error(f"❌ Failed to connect to infrastructure: {str(e)}")
+                import traceback
+                self.service.logger.error(f"Traceback: {traceback.format_exc()}")
+            raise e
+    
+    async def initialize_experience_manager_capabilities(self):
+        """Initialize Experience Manager-specific capabilities."""
+        try:
+            if self.service.logger:
+                self.service.logger.info("🎯 Initializing Experience Manager capabilities...")
+            
+            # Initialize experience-specific services
+            self.service.experience_services = {
+                "frontend_integration": None,
+                "session_manager": None,
+                "ui_state_manager": None,
+                "real_time_coordinator": None
+            }
+            
+            # Initialize gateway capabilities (future expansion)
+            self.service.gateway_services = {
+                "platform_gateway": None,
+                "external_connectors": {},
+                "multi_channel_orchestrator": None,
+                "ai_coexistence_enabler": None
+            }
+            
+            if self.service.logger:
+                self.service.logger.info("✅ Experience Manager capabilities initialized")
+            
+        except Exception as e:
+            if self.service.logger:
+                self.service.logger.error(f"❌ Failed to initialize capabilities: {str(e)}")
+            raise e
+
+
