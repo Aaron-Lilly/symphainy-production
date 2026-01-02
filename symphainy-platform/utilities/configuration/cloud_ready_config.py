@@ -9,7 +9,6 @@ WHAT (Configuration Utility): I provide feature flag management for cloud-ready 
 HOW (Implementation): I read environment variables and provide configuration state
 """
 
-import os
 import logging
 from typing import Dict, Any
 from enum import Enum
@@ -37,19 +36,23 @@ class CloudReadyConfig:
         Initialize cloud-ready configuration.
         
         Args:
-            config_adapter: Optional ConfigAdapter for reading configuration (preferred over os.getenv)
+            config_adapter: ConfigAdapter for reading configuration (required)
+        
+        Raises:
+            ValueError: If config_adapter is not provided
         """
+        if not config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required for CloudReadyConfig. "
+                "Pass config_adapter from Public Works Foundation."
+            )
+        
         self.config_adapter = config_adapter
         
-        # Read mode from ConfigAdapter (preferred) or environment variable
-        if config_adapter:
-            mode_str = config_adapter.get("CLOUD_READY_MODE", "disabled")
-            if isinstance(mode_str, str):
-                mode_str = mode_str.lower()
-        else:
-            mode_str = os.getenv("CLOUD_READY_MODE", "disabled").lower()
-            if mode_str != "disabled":
-                logger.warning("⚠️ [CLOUD_READY_CONFIG] Using os.getenv() - consider passing config_adapter for centralized configuration")
+        # Read mode from ConfigAdapter (required)
+        mode_str = config_adapter.get("CLOUD_READY_MODE", "disabled")
+        if isinstance(mode_str, str):
+            mode_str = mode_str.lower()
         
         if mode_str == "enabled":
             self.mode = CloudReadyMode.ENABLED
@@ -59,16 +62,10 @@ class CloudReadyConfig:
             self.mode = CloudReadyMode.DISABLED
         
         # Component-level flags (override mode if explicitly set)
-        # Use ConfigAdapter if available, otherwise fallback to os.getenv()
+        # Use ConfigAdapter (required)
         def get_config_value(key: str, default: str = "false") -> str:
-            if config_adapter:
-                value = config_adapter.get(key, default)
-                return str(value).lower() if value else default
-            else:
-                value = os.getenv(key, default)
-                if value != default:
-                    logger.warning(f"⚠️ [CLOUD_READY_CONFIG] Using os.getenv() for {key} - consider passing config_adapter")
-                return value.lower()
+            value = config_adapter.get(key, default)
+            return str(value).lower() if value else default
         
         self.auto_discovery_enabled = get_config_value("CLOUD_READY_AUTO_DISCOVERY", "false") == "true"
         self.unified_registry_enabled = get_config_value("CLOUD_READY_UNIFIED_REGISTRY", "false") == "true"
@@ -185,10 +182,13 @@ def get_cloud_ready_config(config_adapter=None) -> CloudReadyConfig:
     Get the global cloud-ready configuration instance.
     
     Args:
-        config_adapter: Optional ConfigAdapter for reading configuration (preferred over os.getenv)
+        config_adapter: ConfigAdapter for reading configuration (required)
     
     Returns:
         CloudReadyConfig instance (singleton).
+    
+    Raises:
+        ValueError: If config_adapter is not provided
     """
     global _cloud_ready_config_instance
     if _cloud_ready_config_instance is None:

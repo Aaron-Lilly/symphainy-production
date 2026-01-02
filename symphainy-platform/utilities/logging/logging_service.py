@@ -47,8 +47,17 @@ class SmartCityLoggingService:
         Args:
             service_name: Name of the service
             log_level: Logging level (default: INFO)
-            config_adapter: Optional ConfigAdapter for reading configuration (preferred over os.getenv)
+            config_adapter: ConfigAdapter for reading configuration (required)
+        
+        Raises:
+            ValueError: If config_adapter is not provided
         """
+        if not config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required for SmartCityLoggingService. "
+                "Pass config_adapter from Public Works Foundation."
+            )
+        
         self.service_name = service_name
         self.config_adapter = config_adapter
         self.log_level = getattr(logging, log_level.upper())
@@ -110,17 +119,11 @@ class SmartCityLoggingService:
             from opentelemetry._logs import get_logger_provider, set_logger_provider
             
             # Check if OTLP endpoint is configured
-            # Use ConfigAdapter if available (preferred), otherwise fallback to os.getenv()
-            if self.config_adapter:
-                otlp_endpoint = self.config_adapter.get("OTEL_EXPORTER_OTLP_ENDPOINT") or self.config_adapter.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-                environment = self.config_adapter.get("ENVIRONMENT", "development")
-                if isinstance(environment, str):
-                    environment = environment.lower()
-            else:
-                otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-                environment = os.getenv("ENVIRONMENT", "development").lower()
-                if otlp_endpoint:
-                    logging.getLogger(__name__).warning("⚠️ [LOGGING_SERVICE] Using os.getenv() - consider passing config_adapter for centralized configuration")
+            # Use ConfigAdapter (required)
+            otlp_endpoint = self.config_adapter.get("OTEL_EXPORTER_OTLP_ENDPOINT") or self.config_adapter.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+            environment = self.config_adapter.get("ENVIRONMENT", "development")
+            if isinstance(environment, str):
+                environment = environment.lower()
             
             is_production = environment in ["production", "prod"]
             
@@ -154,9 +157,11 @@ class SmartCityLoggingService:
                 set_logger_provider(logger_provider)
             
             # Create OTLP log exporter
+            insecure_str = self.config_adapter.get("OTEL_EXPORTER_OTLP_INSECURE", "true")
+            insecure = str(insecure_str).lower() == "true" if isinstance(insecure_str, str) else bool(insecure_str)
             log_exporter = OTLPLogExporter(
                 endpoint=otlp_endpoint,
-                insecure=os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "true").lower() == "true"
+                insecure=insecure
             )
             
             # Add batch processor
@@ -181,7 +186,9 @@ class SmartCityLoggingService:
                 
         except ImportError:
             # OpenTelemetry logging instrumentation not installed
-            environment = os.getenv("ENVIRONMENT", "development").lower()
+            environment = self.config_adapter.get("ENVIRONMENT", "development")
+            if isinstance(environment, str):
+                environment = environment.lower()
             is_production = environment in ["production", "prod"]
             
             if is_production:
@@ -202,7 +209,9 @@ class SmartCityLoggingService:
             raise
         except Exception as e:
             # Any other error - check environment
-            environment = os.getenv("ENVIRONMENT", "development").lower()
+            environment = self.config_adapter.get("ENVIRONMENT", "development")
+            if isinstance(environment, str):
+                environment = environment.lower()
             is_production = environment in ["production", "prod"]
             
             if is_production:

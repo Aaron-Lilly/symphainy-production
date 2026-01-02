@@ -159,7 +159,9 @@ try:
     logger.info("✅ OpenTelemetry logging instrumentation enabled")
 except ImportError:
     # Check if production
-    environment = os.getenv("ENVIRONMENT", "development").lower()
+    environment = config_manager.get("ENVIRONMENT", "development")
+    if isinstance(environment, str):
+        environment = environment.lower()
     if environment in ["production", "prod"]:
         raise RuntimeError(
             "opentelemetry-instrumentation-logging is required in production. "
@@ -167,7 +169,9 @@ except ImportError:
         )
     logger.warning("⚠️ OpenTelemetry logging instrumentation not available (development mode)")
 except Exception as e:
-    environment = os.getenv("ENVIRONMENT", "development").lower()
+    environment = config_manager.get("ENVIRONMENT", "development")
+    if isinstance(environment, str):
+        environment = environment.lower()
     if environment in ["production", "prod"]:
         raise RuntimeError(f"Failed to enable OpenTelemetry logging in production: {e}") from e
     logger.warning(f"⚠️ Failed to enable OpenTelemetry logging: {e}")
@@ -183,9 +187,9 @@ import uvicorn
 try:
     from celery import Celery
     
-    # Get Celery configuration from environment
-    celery_broker_url = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-    celery_result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/1')
+    # Get Celery configuration from ConfigManager
+    celery_broker_url = config_manager.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+    celery_result_backend = config_manager.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/1')
     
     # Create Celery app instance
     celery = Celery(
@@ -1430,7 +1434,9 @@ try:
     FastAPIInstrumentor.instrument_app(app)
     logger.info("✅ OpenTelemetry FastAPI instrumentation enabled")
 except ImportError:
-    environment = os.getenv("ENVIRONMENT", "development").lower()
+    environment = config_manager.get("ENVIRONMENT", "development")
+    if isinstance(environment, str):
+        environment = environment.lower()
     if environment in ["production", "prod"]:
         raise RuntimeError(
             "opentelemetry-instrumentation-fastapi is required in production. "
@@ -1438,7 +1444,9 @@ except ImportError:
         )
     logger.warning("⚠️ OpenTelemetry FastAPI instrumentation not available (development mode)")
 except Exception as e:
-    environment = os.getenv("ENVIRONMENT", "development").lower()
+    environment = config_manager.get("ENVIRONMENT", "development")
+    if isinstance(environment, str):
+        environment = environment.lower()
     if environment in ["production", "prod"]:
         raise RuntimeError(f"Failed to instrument FastAPI in production: {e}") from e
     logger.warning(f"⚠️ Failed to instrument FastAPI: {e}")
@@ -1456,7 +1464,7 @@ except ImportError as e:
     logger.warning(f"⚠️ Failed to import WebSocketRoutingHelper: {e}")
     logger.warning("⚠️ Will use fallback CORS middleware")
     # Fallback CORS middleware setup
-    cors_origins = os.getenv("CORS_ORIGINS") or os.getenv("API_CORS_ORIGINS", "*")
+    cors_origins = config_manager.get("CORS_ORIGINS") or config_manager.get("API_CORS_ORIGINS", "*")
     if cors_origins == "*":
         allow_origins = ["*"]
     else:

@@ -9,7 +9,6 @@ WHAT: Helper utilities for websocket routing
 HOW: Configuration loading, path detection, origin validation
 """
 
-import os
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -34,7 +33,12 @@ class WebSocketRoutingHelper:
     
     @classmethod
     def set_config_adapter(cls, config_adapter):
-        """Set ConfigAdapter for centralized configuration (optional)."""
+        """Set ConfigAdapter for centralized configuration (required)."""
+        if not config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required for WebSocketRoutingHelper. "
+                "Pass config_adapter from Public Works Foundation."
+            )
         cls._config_adapter = config_adapter
     
     @staticmethod
@@ -58,14 +62,17 @@ class WebSocketRoutingHelper:
         
         Returns:
             List[str]: List of websocket path prefixes
+        
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
         """
-        # Try ConfigAdapter first (preferred), then environment, then default
-        if WebSocketRoutingHelper._config_adapter:
-            ws_paths_str = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_PATHS", "/api/ws")
-        else:
-            ws_paths_str = os.getenv("WEBSOCKET_PATHS", "/api/ws")
-            if ws_paths_str != "/api/ws":  # Only warn if non-default value
-                logger.warning("⚠️ [WEBSOCKET_ROUTING] Using os.getenv() - consider setting ConfigAdapter via WebSocketRoutingHelper.set_config_adapter()")
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "with ConfigAdapter from Public Works Foundation."
+            )
+        
+        ws_paths_str = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_PATHS", "/api/ws")
         
         if isinstance(ws_paths_str, str):
             return [path.strip() for path in ws_paths_str.split(",") if path.strip()]
@@ -80,16 +87,20 @@ class WebSocketRoutingHelper:
         
         Returns:
             List[str]: List of allowed origins
+        
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
         """
-        # Try ConfigAdapter first (preferred), then environment
-        if WebSocketRoutingHelper._config_adapter:
-            env = WebSocketRoutingHelper._config_adapter.get("ENVIRONMENT", "development")
-            cors_origins = WebSocketRoutingHelper._config_adapter.get("CORS_ORIGINS") or WebSocketRoutingHelper._config_adapter.get("API_CORS_ORIGINS")
-        else:
-            env = os.getenv("ENVIRONMENT", "development").lower()
-            cors_origins = os.getenv("CORS_ORIGINS") or os.getenv("API_CORS_ORIGINS")
-            if cors_origins:
-                logger.warning("⚠️ [WEBSOCKET_ROUTING] Using os.getenv() - consider setting ConfigAdapter via WebSocketRoutingHelper.set_config_adapter()")
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "with ConfigAdapter from Public Works Foundation."
+            )
+        
+        env = WebSocketRoutingHelper._config_adapter.get("ENVIRONMENT", "development")
+        if isinstance(env, str):
+            env = env.lower()
+        cors_origins = WebSocketRoutingHelper._config_adapter.get("CORS_ORIGINS") or WebSocketRoutingHelper._config_adapter.get("API_CORS_ORIGINS")
         
         if env == "production":
             # Production: specific origins only (no wildcard)
@@ -121,8 +132,19 @@ class WebSocketRoutingHelper:
             
         Returns:
             bool: True if origin is allowed
+        
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
         """
-        env = os.getenv("ENVIRONMENT", "development").lower()
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "with ConfigAdapter from Public Works Foundation."
+            )
+        
+        env = WebSocketRoutingHelper._config_adapter.get("ENVIRONMENT", "development")
+        if isinstance(env, str):
+            env = env.lower()
         allowed_origins = WebSocketRoutingHelper.get_allowed_origins()
         
         # In development, allow all origins (including None/missing)
@@ -159,10 +181,22 @@ class WebSocketRoutingHelper:
         
         Returns:
             Dict with max_connections_per_user and max_global_connections
+        
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
         """
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "with ConfigAdapter from Public Works Foundation."
+            )
+        
+        max_per_user = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_CONNECTIONS_PER_USER", "5")
+        max_global = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_GLOBAL_CONNECTIONS", "1000")
+        
         return {
-            "max_per_user": int(os.getenv("WEBSOCKET_MAX_CONNECTIONS_PER_USER", "5")),
-            "max_global": int(os.getenv("WEBSOCKET_MAX_GLOBAL_CONNECTIONS", "1000"))
+            "max_per_user": int(max_per_user) if isinstance(max_per_user, (str, int)) else 5,
+            "max_global": int(max_global) if isinstance(max_global, (str, int)) else 1000
         }
     
     @staticmethod
@@ -172,10 +206,22 @@ class WebSocketRoutingHelper:
         
         Returns:
             Dict with max_messages_per_second and max_messages_per_minute
+        
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
         """
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "with ConfigAdapter from Public Works Foundation."
+            )
+        
+        max_per_second = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_MESSAGES_PER_SECOND", "10")
+        max_per_minute = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_MESSAGES_PER_MINUTE", "100")
+        
         return {
-            "max_per_second": int(os.getenv("WEBSOCKET_MAX_MESSAGES_PER_SECOND", "10")),
-            "max_per_minute": int(os.getenv("WEBSOCKET_MAX_MESSAGES_PER_MINUTE", "100"))
+            "max_per_second": int(max_per_second) if isinstance(max_per_second, (str, int)) else 10,
+            "max_per_minute": int(max_per_minute) if isinstance(max_per_minute, (str, int)) else 100
         }
     
     @staticmethod
