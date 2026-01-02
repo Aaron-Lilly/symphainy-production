@@ -48,7 +48,8 @@ export class UnifiedConfigManager {
         retryDelay: 1000,
       },
       websocket: {
-        url: process.env.NEXT_PUBLIC_WEBSOCKET_URL || `${getWebSocketBaseURL()}/api/ws/agent`,
+        // NEW: Single WebSocket endpoint via Post Office Gateway
+        url: process.env.NEXT_PUBLIC_WEBSOCKET_URL || `${getWebSocketBaseURL()}/ws`,
         reconnectAttempts: 5,
         reconnectDelay: 1000,
         heartbeatInterval: 30000,

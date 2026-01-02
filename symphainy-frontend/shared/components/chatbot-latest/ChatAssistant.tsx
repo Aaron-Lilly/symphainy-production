@@ -29,7 +29,8 @@ export default function ChatAssistant() {
     const { getWebSocketUrl } = require('@/shared/config/api-config');
     const wsBaseURL = getWebSocketUrl(sessionToken).replace(/\?.*$/, ''); // Remove token param for base URL
     const tokenParam = sessionToken ? `?session_token=${encodeURIComponent(sessionToken)}` : '';
-    const wsUrl = `${wsBaseURL}/api/ws/agent${tokenParam}`;
+    // NEW: Single WebSocket endpoint via Post Office Gateway
+    const wsUrl = `${wsBaseURL}/ws${tokenParam}`;
     
     const ws = new WebSocket(wsUrl);
     websocketRef.current = ws;

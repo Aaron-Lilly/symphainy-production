@@ -54,8 +54,8 @@ export function useExperienceChat({ sessionToken, onContextUpdate }: UseExperien
     const { getWebSocketUrl } = require('@/shared/config/api-config');
     const API_URL = getWebSocketUrl(sessionToken).replace(/\?.*$/, '').replace(/^ws/, 'http'); // Convert back to HTTP for base URL
     
-    // Guide Agent WebSocket (Phase 6: Updated endpoint)
-    const guideWs = new WebSocket(`${API_URL.replace('http', 'ws')}/api/ws/guide${sessionToken ? `?session_token=${sessionToken}` : ''}`);
+    // NEW: Single WebSocket endpoint via Post Office Gateway
+    const guideWs = new WebSocket(`${API_URL.replace('http', 'ws')}/ws${sessionToken ? `?session_token=${sessionToken}` : ''}`);
     
     guideWs.onopen = () => {
       console.log('Guide WebSocket connected');

@@ -145,9 +145,9 @@ export const GuideAgentProvider: React.FC<{ children: ReactNode }> = ({ children
     try {
       setState(prev => ({ ...prev, isLoading: true, error: null }));
 
-      // Connect to Unified Agent WebSocket (Phase 5: Unified WebSocket Architecture)
-      // Using /api/ws/agent endpoint with agent_type routing
-      const connectionId = await websocket.connect('/api/ws/agent', {
+      // NEW: Single WebSocket endpoint via Post Office Gateway
+      // Channel routing is done via message format, not endpoint
+      const connectionId = await websocket.connect('/ws', {
         requireAuth: true,
         autoReconnect: true,
         heartbeat: true

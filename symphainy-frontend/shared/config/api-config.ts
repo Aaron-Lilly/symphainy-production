@@ -76,7 +76,8 @@ export function getWebSocketUrl(sessionToken?: string | null): string {
     ? `?session_token=${encodeURIComponent(sessionToken)}` 
     : '';
   
-  return `${wsBaseUrl}/api/ws/agent${tokenParam}`;
+  // NEW: Single WebSocket endpoint via Post Office Gateway
+  return `${wsBaseUrl}/ws${tokenParam}`;
 }
 
 /**

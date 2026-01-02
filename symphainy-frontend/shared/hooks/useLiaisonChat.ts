@@ -97,8 +97,9 @@ export function useLiaisonChat(
       setIsLoading(true);
       setError(null);
 
-      // Build WebSocket URL with session token
-      const endpoint = `/api/ws/liaison/${pillar}?session_token=${sessionToken}`;
+      // NEW: Single WebSocket endpoint via Post Office Gateway
+      // Channel routing is done via message format, not endpoint
+      const endpoint = `/ws?session_token=${sessionToken}`;
       
       // Connect via WebSocketService
       const connectionId = await webSocketService.connect(endpoint, {

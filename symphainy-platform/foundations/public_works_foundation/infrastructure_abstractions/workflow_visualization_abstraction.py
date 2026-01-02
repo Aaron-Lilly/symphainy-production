@@ -64,17 +64,6 @@ class WorkflowVisualizationAbstraction(WorkflowVisualizationProtocol):
     async def create_workflow_flowchart(self, workflow_data: Dict[str, Any]) -> VisualizationResult:
         """Create workflow flowchart visualization."""
         try:
-            # Get utilities from DI container
-            error_handler = None
-            telemetry = None
-            if self.di_container and hasattr(self.di_container, 'get_utility'):
-                try:
-                    error_handler = self.di_container.get_utility('error_handler')
-                    telemetry = self.di_container.get_utility('telemetry')
-                except Exception as e:
-                    self.logger.error(f"❌ Error getting utilities: {e}")
-                    pass
-
             # Use adapter to create flowchart
             result = await self.workflow_visualization_adapter.create_flowchart(workflow_data)
             
@@ -119,12 +108,6 @@ class WorkflowVisualizationAbstraction(WorkflowVisualizationProtocol):
             VisualizationResult with swimlane diagram data
         """
         try:
-            # Get utilities from DI container
-            error_handler = None
-            telemetry = None
-            if self.di_container and hasattr(self.di_container, 'get_utility'):
-                pass
-            
             result = await self.workflow_visualization_adapter.create_swimlane_diagram(workflow_data)
             
             if result.get("success"):
@@ -168,12 +151,6 @@ class WorkflowVisualizationAbstraction(WorkflowVisualizationProtocol):
             VisualizationResult with Gantt chart data
         """
         try:
-            # Get utilities from DI container
-            error_handler = None
-            telemetry = None
-            if self.di_container and hasattr(self.di_container, 'get_utility'):
-                pass
-            
             result = await self.workflow_visualization_adapter.create_gantt_chart(workflow_data)
             
             if result.get("success"):
@@ -217,12 +194,6 @@ class WorkflowVisualizationAbstraction(WorkflowVisualizationProtocol):
             VisualizationResult with network diagram data
         """
         try:
-            # Get utilities from DI container
-            error_handler = None
-            telemetry = None
-            if self.di_container and hasattr(self.di_container, 'get_utility'):
-                pass
-            
             result = await self.workflow_visualization_adapter.create_network_diagram(workflow_data)
             
             if result.get("success"):
@@ -262,10 +233,7 @@ class WorkflowVisualizationAbstraction(WorkflowVisualizationProtocol):
         Returns:
             List of supported visualization types
         """
-        # Get utilities from DI container
-        error_handler = None
-        if self.di_container and hasattr(self.di_container, 'get_utility'):
-            types = [
+        types = [
                 VisualizationType.FLOWCHART,
                 VisualizationType.SWIMLANE,
                 VisualizationType.GANTT,
@@ -282,11 +250,7 @@ class WorkflowVisualizationAbstraction(WorkflowVisualizationProtocol):
         Returns:
             Dict with validation results
         """
-        # Get utilities from DI container
-        error_handler = None
-        telemetry = None
-        if self.di_container and hasattr(self.di_container, 'get_utility'):
-            validation_result = {
+        validation_result = {
                 "valid": True,
                 "errors": [],
                 "warnings": []
@@ -320,10 +284,7 @@ class WorkflowVisualizationAbstraction(WorkflowVisualizationProtocol):
         Returns:
             Dict: Health check result
         """
-        # Get utilities from DI container
-        error_handler = None
-        if self.di_container and hasattr(self.di_container, 'get_utility'):
-            adapter_health = await self.workflow_visualization_adapter.health_check()
+        adapter_health = await self.workflow_visualization_adapter.health_check()
             
             health_result = {
                 "healthy": adapter_health.get("healthy", False),

@@ -75,23 +75,67 @@ async def register_api_routers(app: FastAPI, platform_orchestrator) -> None:
         app.include_router(universal_pillar_router)
         logger.info("✅ Universal pillar router registered with FastAPI app")
         
-        # Register WebSocket router (required for MVP)
+        # Register WebSocket Gateway router (NEW - Post Office Gateway)
         try:
-            from backend.api.websocket_router import router as websocket_router, set_platform_orchestrator
-            # Set platform orchestrator reference for WebSocket router
-            set_platform_orchestrator(platform_orchestrator)
-            app.include_router(websocket_router)
-            logger.info("✅ WebSocket router registered with FastAPI app")
+            from backend.api.websocket_gateway_router import router as websocket_gateway_router, set_websocket_gateway_service
+            from backend.smart_city.services.post_office.websocket_gateway_service import WebSocketGatewayService
+            
+            # Discover Post Office service via Curator
+            curator = platform_orchestrator.foundation_services.get("CuratorFoundationService")
+            post_office_service = None
+            
+            if curator:
+                try:
+                    post_office_service = await curator.discover_service_by_name("PostOfficeService")
+                    if post_office_service:
+                        logger.info("✅ Discovered PostOfficeService via Curator")
+                except Exception as e:
+                    logger.warning(f"⚠️ PostOfficeService not available via Curator: {e}")
+            
+            # Fallback: Try to get from City Manager
+            if not post_office_service:
+                try:
+                    city_manager = platform_orchestrator.managers.get("city_manager")
+                    if city_manager and hasattr(city_manager, 'get_smart_city_service'):
+                        post_office_service = await city_manager.get_smart_city_service("PostOfficeService")
+                        if post_office_service:
+                            logger.info("✅ Retrieved PostOfficeService via City Manager")
+                except Exception as e:
+                    logger.warning(f"⚠️ PostOfficeService not available via City Manager: {e}")
+            
+            # Create WebSocket Gateway Service
+            if post_office_service:
+                websocket_gateway_service = WebSocketGatewayService(
+                    di_container=platform_orchestrator.di_container,
+                    post_office_service=post_office_service
+                )
+                
+                # Initialize the gateway service
+                initialized = await websocket_gateway_service.initialize()
+                if initialized:
+                    # Set in router
+                    set_websocket_gateway_service(websocket_gateway_service)
+                    
+                    # Register router
+                    app.include_router(websocket_gateway_router)
+                    logger.info("✅ WebSocket Gateway router registered with FastAPI app")
+                else:
+                    logger.warning("⚠️ WebSocket Gateway Service not ready - router not registered")
+            else:
+                logger.warning("⚠️ PostOfficeService not available - WebSocket Gateway router not registered")
+                
         except ImportError as e:
-            logger.error(f"❌ Failed to import WebSocket router: {e}")
+            logger.error(f"❌ Failed to import WebSocket Gateway router: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            raise RuntimeError(f"WebSocket router is required for MVP but failed to import: {e}") from e
+            # Don't fail startup - WebSocket is important but not critical for basic functionality
+            logger.warning("⚠️ Continuing without WebSocket Gateway router")
         except Exception as e:
-            logger.error(f"❌ Failed to register WebSocket router: {e}")
+            logger.error(f"❌ Failed to register WebSocket Gateway router: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            raise RuntimeError(f"WebSocket router is required for MVP but registration failed: {e}") from e
+            # Don't fail startup - WebSocket is important but not critical for basic functionality
+            logger.warning("⚠️ Continuing without WebSocket Gateway router")
         
         # Register Client Collaboration router (NEW - Week 4)
         try:

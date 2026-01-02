@@ -46,7 +46,8 @@ export default function ChatAssistant() {
 
     // Use centralized API config (NO hardcoded values)
     const { getWebSocketUrl } = require('@/shared/config/api-config');
-    const wsUrl = getWebSocketUrl('/api/ws/agent', guideSessionToken);
+    // NEW: Single WebSocket endpoint via Post Office Gateway
+    const wsUrl = getWebSocketUrl('/ws', guideSessionToken);
     
     const ws = new WebSocket(wsUrl);
     websocketRef.current = ws;
