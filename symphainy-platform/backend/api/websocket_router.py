@@ -16,6 +16,7 @@ import sys
 import os
 import uuid
 import time
+import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -85,8 +86,14 @@ async def get_traffic_cop_service() -> Optional[Any]:
             logger.warning("⚠️ Platform Orchestrator not available")
             return None
         
+        # Get di_container from PlatformOrchestrator's infrastructure_services
+        di_container = platform_orchestrator.infrastructure_services.get("di_container")
+        if not di_container:
+            logger.warning("⚠️ DI Container not available in Platform Orchestrator")
+            return None
+        
         # Get Traffic Cop via Curator's registered_services
-        curator = platform_orchestrator.di_container.get_curator_foundation()
+        curator = di_container.get_curator_foundation()
         if curator and hasattr(curator, 'registered_services'):
             # Check for service name variants
             service_variants = ["TrafficCop", "TrafficCopService", "traffic_cop"]
@@ -657,9 +664,10 @@ async def unified_agent_websocket(websocket: WebSocket, session_token: str = Que
         "visualization": {...}  # Optional visualization component
     }
     """
-    # IMPORTANT: Accept websocket connection FIRST, then validate
-    # Starlette/FastAPI will reject with 403 if we try to validate before accepting
-    # We'll accept, then validate and close if invalid
+    # ✅ STANDARD WEBSOCKET PATTERN: Accept quickly, validate minimally, enter message loop immediately
+    # Heavy setup (service lookups, SDK initialization) happens lazily when first message arrives
+    
+    # 1. Accept connection immediately (required by FastAPI/Starlette)
     try:
         await websocket.accept()
         logger.debug(f"🔌 WebSocket connection accepted (session_token: {session_token})")
@@ -667,7 +675,7 @@ async def unified_agent_websocket(websocket: WebSocket, session_token: str = Que
         logger.error(f"❌ Failed to accept websocket connection: {e}")
         return
     
-    # Phase 1: Security Hardening - Origin Validation (after accept)
+    # 2. Minimal validation (fast checks only)
     origin = websocket.headers.get("origin")
     if not WebSocketRoutingHelper.validate_origin(origin):
         logger.warning(f"🚫 WebSocket connection rejected: invalid origin '{origin}' (session_token: {session_token})")
@@ -677,11 +685,10 @@ async def unified_agent_websocket(websocket: WebSocket, session_token: str = Que
             pass
         return
     
-    # Phase 1: Security Hardening - Connection Limits
+    # Connection limits check
     connection_limits = WebSocketRoutingHelper.get_connection_limits()
     session_id_key = session_token or "anonymous"
     
-    # Check per-user connection limit
     if _connection_tracking["user_connections"][session_id_key] >= connection_limits["max_per_user"]:
         logger.warning(f"🚫 WebSocket connection rejected: user connection limit exceeded (session_token: {session_token})")
         try:
@@ -690,7 +697,6 @@ async def unified_agent_websocket(websocket: WebSocket, session_token: str = Que
             pass
         return
     
-    # Check global connection limit
     if _connection_tracking["global_connections"] >= connection_limits["max_global"]:
         logger.warning(f"🚫 WebSocket connection rejected: global connection limit exceeded")
         try:
@@ -703,179 +709,213 @@ async def unified_agent_websocket(websocket: WebSocket, session_token: str = Que
     _connection_tracking["user_connections"][session_id_key] += 1
     _connection_tracking["global_connections"] += 1
     
-    # Phase 3: Observability - Record connection metric
     connection_start_time = time.time()
-    try:
-        # Try to get telemetry service for metrics
-        platform_orchestrator = await get_platform_orchestrator()
-        if platform_orchestrator:
-            public_works = platform_orchestrator.foundation_services.get("PublicWorksFoundationService")
-            if public_works and hasattr(public_works, 'telemetry_foundation'):
-                telemetry = public_works.telemetry_foundation
-                if telemetry:
-                    try:
-                        await telemetry.record_health_metric(
-                            "websocket.connection.accepted",
-                            1.0,
-                            {
-                                "session_token": session_token or "anonymous",
-                                "origin": origin or "unknown",
-                                "global_connections": _connection_tracking["global_connections"]
-                            }
-                        )
-                    except Exception as e:
-                        logger.debug(f"Could not record websocket metric: {e}")
-    except Exception as e:
-        logger.debug(f"Could not get telemetry service: {e}")
-    
-    # Connection already accepted above, log success
     logger.info(f"🔌 Unified Agent WebSocket connection accepted (session_token: {session_token}, origin: {origin}, global_connections: {_connection_tracking['global_connections']})")
     
-    traffic_cop = None
-    unified_sdk = None
-    connection_id = None
-    auth_context = None
-    setup_start = time.time()  # Track setup time from the beginning
+    # 3. Generate connection ID (fast, no I/O)
+    connection_id = f"unified_agent_{session_id_key}_{uuid.uuid4().hex[:8]}"
     
+    # 4. Send welcome message immediately (keeps connection alive)
     try:
+        welcome_message = {
+            "type": "system",
+            "message": "Connected to Unified Agent WebSocket. Ready to receive messages.",
+            "agent_type": "guide",
+            "connection_id": connection_id
+        }
+        await websocket.send_json(welcome_message)
+        logger.info(f"✅ [WEBSOCKET] Welcome message sent (connection_id: {connection_id})")
+    except Exception as welcome_error:
+        logger.warning(f"⚠️ [WEBSOCKET] Failed to send welcome message: {welcome_error}")
+        # Continue anyway - connection might still be usable
+    
+    # 5. Initialize services lazily (will be set up when first message arrives)
+    unified_sdk = None
+    traffic_cop = None
+    session_id = session_id_key  # Use session_token as fallback initially
+    auth_context = None
+    setup_complete = False
+    heartbeat_task = None  # Background heartbeat task for keepalive (initialized in try block)
+    
+    # Phase 1: Security Hardening - Rate Limiting Helper (defined at function scope)
+    def check_rate_limit(session_key: str) -> bool:
+        """Check if message is within rate limits."""
+        rate_limits = WebSocketRoutingHelper.get_rate_limits()
+        current_time = time.time()
         
-        # 0. Validate JWT token if provided (NEW - security enhancement)
-        if session_token and session_token != "anonymous" and len(session_token) > 50:  # Likely a JWT token
-            try:
-                logger.info(f"🔐 [WEBSOCKET] Validating JWT token for websocket connection...")
-                auth_start = time.time()
-                
-                # Get auth abstraction for token validation
-                platform_orchestrator = await get_platform_orchestrator()
-                if platform_orchestrator:
-                    public_works = platform_orchestrator.foundation_services.get("PublicWorksFoundationService")
-                    if public_works and hasattr(public_works, 'auth_abstraction'):
-                        auth_abstraction = public_works.auth_abstraction
-                        if auth_abstraction:
-                            try:
-                                auth_context = await auth_abstraction.validate_token(session_token)
-                                auth_time = time.time() - auth_start
-                                logger.info(f"✅ [WEBSOCKET] JWT token validated in {auth_time:.3f}s for user: {auth_context.user_id}")
-                            except Exception as auth_error:
-                                auth_time = time.time() - auth_start
-                                logger.error(f"❌ [WEBSOCKET] JWT token validation failed after {auth_time:.3f}s: {auth_error}")
-                                logger.error(f"❌ [WEBSOCKET] Token validation error type: {type(auth_error).__name__}")
-                                # Don't close connection - allow anonymous access for now (can be made stricter later)
-                                logger.warning(f"⚠️ [WEBSOCKET] Allowing connection despite token validation failure (anonymous mode)")
-                        else:
-                            logger.warning(f"⚠️ [WEBSOCKET] Auth abstraction not available - skipping token validation")
-                    else:
-                        logger.warning(f"⚠️ [WEBSOCKET] PublicWorksFoundationService not available - skipping token validation")
-                else:
-                    logger.warning(f"⚠️ [WEBSOCKET] Platform orchestrator not available - skipping token validation")
-            except Exception as token_error:
-                logger.error(f"❌ [WEBSOCKET] Error during token validation setup: {token_error}", exc_info=True)
-                # Continue without token validation (graceful degradation)
+        # Clean old timestamps (older than 1 minute)
+        message_timestamps = _connection_tracking["message_rates"][session_key]
+        message_timestamps[:] = [ts for ts in message_timestamps if current_time - ts < 60]
         
-        # 1. Validate session via Traffic Cop SOA API (optional - allow connection even if unavailable)
-        traffic_cop_start = time.time()
+        # Check per-second limit
+        recent_second = [ts for ts in message_timestamps if current_time - ts < 1]
+        if len(recent_second) >= rate_limits["max_per_second"]:
+            logger.warning(f"🚫 Rate limit exceeded: {len(recent_second)} messages in last second (session_token: {session_token})")
+            return False
+        
+        # Check per-minute limit
+        if len(message_timestamps) >= rate_limits["max_per_minute"]:
+            logger.warning(f"🚫 Rate limit exceeded: {len(message_timestamps)} messages in last minute (session_token: {session_token})")
+            return False
+        
+        # Record message timestamp
+        message_timestamps.append(current_time)
+        return True
+    
+    async def ensure_setup_complete():
+        """Lazy initialization of services - called when first message arrives."""
+        nonlocal unified_sdk, traffic_cop, session_id, auth_context, setup_complete
+        
+        if setup_complete:
+            return
+        
+        setup_start = time.time()
+        logger.debug(f"🔧 [WEBSOCKET] Starting lazy setup (connection_id: {connection_id})")
+        
         try:
-            traffic_cop = await get_traffic_cop_service()
-            traffic_cop_time = time.time() - traffic_cop_start
-            logger.debug(f"🔍 [WEBSOCKET] Traffic Cop service obtained in {traffic_cop_time:.3f}s")
+            # Get Unified Agent WebSocket SDK (required for message handling)
+            experience_foundation = await get_experience_foundation()
+            if not experience_foundation:
+                raise Exception("Experience Foundation not available")
+            
+            unified_sdk = await experience_foundation.get_unified_agent_websocket_sdk()
+            if not unified_sdk:
+                raise Exception("Unified Agent WebSocket SDK not available")
+            
+            # Optional: Get Traffic Cop for session management
+            try:
+                traffic_cop = await get_traffic_cop_service()
+                if traffic_cop and hasattr(traffic_cop, 'call_soa_api'):
+                    session_response = await traffic_cop.call_soa_api("session_management", {
+                        "action": "get_or_create",
+                        "session_token": session_token or "anonymous"
+                    })
+                    if session_response and isinstance(session_response, dict):
+                        session = session_response.get("session", {})
+                        session_id = session.get("session_id", session_id)
+                        
+                        # Link WebSocket to session
+                        await traffic_cop.call_soa_api("websocket_session", {
+                            "action": "link",
+                            "websocket_id": connection_id,
+                            "session_id": session_id
+                        })
+            except Exception as e:
+                logger.debug(f"⚠️ [WEBSOCKET] Traffic Cop setup failed (non-critical): {e}")
+            
+            # Optional: Validate JWT token
+            if session_token and session_token != "anonymous" and len(session_token) > 50:
+                try:
+                    platform_orchestrator = await get_platform_orchestrator()
+                    if platform_orchestrator:
+                        public_works = platform_orchestrator.foundation_services.get("PublicWorksFoundationService")
+                        if public_works and hasattr(public_works, 'auth_abstraction'):
+                            auth_abstraction = public_works.auth_abstraction
+                            if auth_abstraction:
+                                auth_context = await auth_abstraction.validate_token(session_token)
+                                logger.debug(f"✅ [WEBSOCKET] JWT token validated for user: {auth_context.user_id}")
+                except Exception as e:
+                    logger.debug(f"⚠️ [WEBSOCKET] Token validation failed (non-critical): {e}")
+            
+            setup_complete = True
+            setup_time = time.time() - setup_start
+            logger.info(f"✅ [WEBSOCKET] Lazy setup completed in {setup_time:.3f}s (connection_id: {connection_id})")
+            
         except Exception as e:
-            traffic_cop_time = time.time() - traffic_cop_start
-            logger.warning(f"⚠️ [WEBSOCKET] Could not get Traffic Cop service after {traffic_cop_time:.3f}s: {e} - continuing without session validation")
+            logger.error(f"❌ [WEBSOCKET] Lazy setup failed: {e}", exc_info=True)
+            # Don't close connection - allow retry on next message
+            raise
+    
+    # 6. Background heartbeat task for keepalive during idle periods
+    # ✅ PATTERN: Keep connection alive while user interacts with other page elements
+    # Wrap main logic in try block for error handling
+    try:
+        heartbeat_interval = 30  # Send heartbeat every 30 seconds
+        last_heartbeat_time = time.time()
         
-        session_response = None
-        session_id = None
-        
-        if traffic_cop and hasattr(traffic_cop, 'call_soa_api'):
-            session_start = time.time()
+        async def heartbeat_loop():
+            """Background task that sends periodic heartbeat messages to keep connection alive."""
+            nonlocal last_heartbeat_time
             try:
-                session_response = await traffic_cop.call_soa_api("session_management", {
-                    "action": "get_or_create",
-                    "session_token": session_token or "anonymous"
-                })
-                session = session_response.get("session") if session_response and isinstance(session_response, dict) else {}
-                session_id = session.get("session_id") if session else None
-                session_time = time.time() - session_start
-                logger.debug(f"🔍 [WEBSOCKET] Session obtained via Traffic Cop in {session_time:.3f}s: {session_id}")
+                while True:
+                    await asyncio.sleep(heartbeat_interval)
+                    
+                    # Check if connection is still alive
+                    if websocket.client_state.name != "CONNECTED":
+                        logger.debug(f"🔌 [WEBSOCKET] Connection closed, stopping heartbeat (connection_id: {connection_id})")
+                        break
+                    
+                    try:
+                        # Send heartbeat ping
+                        heartbeat_message = {
+                            "type": "heartbeat",
+                            "action": "ping",
+                            "timestamp": time.time(),
+                            "connection_id": connection_id
+                        }
+                        await websocket.send_json(heartbeat_message)
+                        last_heartbeat_time = time.time()
+                        logger.debug(f"💓 [WEBSOCKET] Heartbeat ping sent (connection_id: {connection_id})")
+                    except Exception as heartbeat_error:
+                        # Connection likely closed
+                        logger.debug(f"🔌 [WEBSOCKET] Heartbeat failed, connection closed: {heartbeat_error}")
+                        break
+            except asyncio.CancelledError:
+                logger.debug(f"💓 [WEBSOCKET] Heartbeat task cancelled (connection_id: {connection_id})")
             except Exception as e:
-                session_time = time.time() - session_start
-                logger.warning(f"⚠️ [WEBSOCKET] Failed to get session via Traffic Cop after {session_time:.3f}s: {e}", exc_info=True)
+                logger.warning(f"⚠️ [WEBSOCKET] Heartbeat task error: {e}")
         
-        # Use session_token as fallback if Traffic Cop unavailable
-        if not session_id:
-            session_id = session_token or "anonymous"
-            logger.debug(f"🔍 [WEBSOCKET] Using session_token as session_id: {session_id[:50]}..." if len(session_id) > 50 else f"🔍 [WEBSOCKET] Using session_token as session_id: {session_id}")
+        # Start heartbeat task (assign to outer scope variable)
+        heartbeat_task = asyncio.create_task(heartbeat_loop())
+        logger.debug(f"💓 [WEBSOCKET] Heartbeat task started (connection_id: {connection_id}, interval: {heartbeat_interval}s)")
         
-        # 2. Get Unified Agent WebSocket SDK from Experience Foundation
-        experience_start = time.time()
-        experience_foundation = await get_experience_foundation()
-        experience_time = time.time() - experience_start
-        if not experience_foundation:
-            logger.error(f"❌ [WEBSOCKET] Experience Foundation not available after {experience_time:.3f}s")
-            await websocket.close(code=4002, reason="Experience Foundation not available")
-            return
-        logger.debug(f"🔍 [WEBSOCKET] Experience Foundation obtained in {experience_time:.3f}s")
-        
-        # Get Unified Agent WebSocket SDK from Experience Foundation
-        sdk_start = time.time()
-        unified_sdk = await experience_foundation.get_unified_agent_websocket_sdk()
-        sdk_time = time.time() - sdk_start
-        if not unified_sdk:
-            logger.error(f"❌ [WEBSOCKET] Unified Agent WebSocket SDK not available after {sdk_time:.3f}s")
-            await websocket.close(code=4003, reason="Unified Agent WebSocket SDK not available")
-            return
-        logger.debug(f"🔍 [WEBSOCKET] Unified Agent WebSocket SDK obtained in {sdk_time:.3f}s")
-        
-        # 3. Generate connection ID
-        connection_id = f"unified_agent_{session_id or 'anonymous'}_{uuid.uuid4().hex[:8]}"
-        logger.info(f"🔌 [WEBSOCKET] Connection ID generated: {connection_id}")
-        
-        # 4. Link WebSocket to session (via Traffic Cop)
-        if connection_id and session_id and traffic_cop and hasattr(traffic_cop, 'call_soa_api'):
-            link_start = time.time()
-            try:
-                await traffic_cop.call_soa_api("websocket_session", {
-                    "action": "link",
-                    "websocket_id": connection_id,
-                    "session_id": session_id
-                })
-                link_time = time.time() - link_start
-                logger.debug(f"🔍 [WEBSOCKET] WebSocket linked to session in {link_time:.3f}s")
-            except Exception as e:
-                link_time = time.time() - link_start
-                logger.warning(f"⚠️ [WEBSOCKET] Failed to link WebSocket to session after {link_time:.3f}s: {e}", exc_info=True)
-        
-        setup_time = time.time() - setup_start
-        logger.info(f"✅ [WEBSOCKET] WebSocket setup completed in {setup_time:.3f}s (connection_id: {connection_id}, user_id: {auth_context.user_id if auth_context else 'anonymous'})")
-        
-        # Phase 1: Security Hardening - Rate Limiting Helper
-        def check_rate_limit(session_key: str) -> bool:
-            """Check if message is within rate limits."""
-            rate_limits = WebSocketRoutingHelper.get_rate_limits()
-            current_time = time.time()
-            
-            # Clean old timestamps (older than 1 minute)
-            message_timestamps = _connection_tracking["message_rates"][session_key]
-            message_timestamps[:] = [ts for ts in message_timestamps if current_time - ts < 60]
-            
-            # Check per-second limit
-            recent_second = [ts for ts in message_timestamps if current_time - ts < 1]
-            if len(recent_second) >= rate_limits["max_per_second"]:
-                logger.warning(f"🚫 Rate limit exceeded: {len(recent_second)} messages in last second (session_token: {session_token})")
-                return False
-            
-            # Check per-minute limit
-            if len(message_timestamps) >= rate_limits["max_per_minute"]:
-                logger.warning(f"🚫 Rate limit exceeded: {len(message_timestamps)} messages in last minute (session_token: {session_token})")
-                return False
-            
-            # Record message timestamp
-            message_timestamps.append(current_time)
-            return True
-        
-        # 5. Message loop
+        # 7. Message loop - enters immediately, setup happens lazily
+        # ✅ PATTERN: Connection "waits in background" - message loop handles both:
+        #   - Regular chat messages (guide/liaison agents)
+        #   - Heartbeat pong responses (keepalive)
         try:
             while True:
+                # ✅ CRITICAL: Enter message loop immediately - setup happens lazily on first message
+                # This allows connection to "wait in background" during idle periods
                 message_data = await websocket.receive_json()
+                
+                # Handle heartbeat pong responses (keepalive)
+                if message_data.get("type") == "heartbeat" and message_data.get("action") == "pong":
+                    # Client responded to heartbeat - connection is alive
+                    last_heartbeat_time = time.time()
+                    logger.debug(f"💓 [WEBSOCKET] Heartbeat pong received (connection_id: {connection_id})")
+                    continue  # Skip to next message - no agent processing needed
+                
+                # Regular message handling (guide/liaison agents)
+                
+                # Ensure services are initialized (lazy setup on first message)
+                if not setup_complete:
+                    try:
+                        await ensure_setup_complete()
+                    except Exception as setup_error:
+                        # If setup fails, send error and continue (allow retry)
+                        try:
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": f"Service initialization failed: {str(setup_error)}. Please try again.",
+                                "agent_type": message_data.get("agent_type", "unknown")
+                            })
+                        except:
+                            pass
+                        # Continue to next message - setup might succeed on retry
+                        continue
+                
+                # Verify unified_sdk is available (required for message handling)
+                if not unified_sdk:
+                    try:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Service not available. Please reconnect.",
+                            "agent_type": message_data.get("agent_type", "unknown")
+                        })
+                    except:
+                        pass
+                    continue
                 
                 # Phase 1: Security Hardening - Rate Limiting
                 if not check_rate_limit(session_id_key):
@@ -943,15 +983,18 @@ async def unified_agent_websocket(websocket: WebSocket, session_token: str = Que
                 # Send response via WebSocket
                 await websocket.send_json(response)
                 
-        except WebSocketDisconnect:
+        except WebSocketDisconnect as disconnect:
             connection_duration = time.time() - connection_start_time
-            logger.info(f"🔌 [WEBSOCKET] Unified Agent WebSocket disconnected: {connection_id} (duration: {connection_duration:.3f}s)")
+            logger.info(f"🔌 [WEBSOCKET] Unified Agent WebSocket disconnected normally: {connection_id} (duration: {connection_duration:.3f}s, code: {getattr(disconnect, 'code', 'unknown')})")
         except Exception as e:
             connection_duration = time.time() - connection_start_time
             logger.error(f"❌ [WEBSOCKET] Error in Unified Agent WebSocket message loop after {connection_duration:.3f}s: {e}")
             logger.error(f"❌ [WEBSOCKET] Exception type: {type(e).__name__}")
             import traceback
             logger.error(f"❌ [WEBSOCKET] Traceback: {traceback.format_exc()}")
+            # Check if this is a connection closure error
+            if "connection closed" in str(e).lower() or "websocket" in str(e).lower():
+                logger.warning(f"⚠️ [WEBSOCKET] Connection appears to have been closed by client or network (connection_id: {connection_id})")
             try:
                 await websocket.send_json({
                     "type": "error",
@@ -961,18 +1004,27 @@ async def unified_agent_websocket(websocket: WebSocket, session_token: str = Que
             except Exception as send_error:
                 logger.error(f"❌ [WEBSOCKET] Failed to send error message: {send_error}")
                 # WebSocket may already be closed
-                
-    except Exception as e:
-        setup_time = time.time() - setup_start
-        logger.error(f"❌ [WEBSOCKET] Unified Agent WebSocket setup failed after {setup_time:.3f}s: {e}")
+        
+        except Exception as e:
+            connection_duration = time.time() - connection_start_time
+        logger.error(f"❌ [WEBSOCKET] Unified Agent WebSocket error after {connection_duration:.3f}s: {e}")
         logger.error(f"❌ [WEBSOCKET] Exception type: {type(e).__name__}")
         import traceback
         logger.error(f"❌ [WEBSOCKET] Traceback: {traceback.format_exc()}")
         try:
-            await websocket.close(code=4006, reason=f"Setup failed: {str(e)}")
+            await websocket.close(code=4006, reason=f"Error: {str(e)}")
         except Exception as close_error:
             logger.error(f"❌ [WEBSOCKET] Failed to close websocket: {close_error}")
     finally:
+        # Stop heartbeat task
+        if heartbeat_task and not heartbeat_task.done():
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            logger.debug(f"💓 [WEBSOCKET] Heartbeat task stopped (connection_id: {connection_id})")
+        
         # Phase 1: Security Hardening - Cleanup Connection Tracking
         _connection_tracking["user_connections"][session_id_key] = max(0, _connection_tracking["user_connections"][session_id_key] - 1)
         _connection_tracking["global_connections"] = max(0, _connection_tracking["global_connections"] - 1)

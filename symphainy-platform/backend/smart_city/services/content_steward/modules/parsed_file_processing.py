@@ -122,54 +122,53 @@ class ParsedFileProcessing:
                     self.logger.error(f"❌ [store_parsed_file] Invalid JSONL bytes: {e}")
                     raise ValueError(f"Invalid JSONL bytes: {e}")
             
-            # Store parsed file in GCS (via file_management_abstraction)
-            # Note: We'll use the file_management_abstraction's GCS adapter
-            # For now, we'll store it as a new file record, but mark it as parsed
-            parsed_file_record = {
-                "user_id": original_file.get("user_id", "system"),
-                "tenant_id": tenant_id,
-                "ui_name": f"parsed_{original_file.get('ui_name', file_id)}",
-                "file_type": format_type,
-                "mime_type": f"application/{format_type}",
-                "file_content": parsed_file_data,
-                "metadata": {
-                    "original_file_id": file_id,
-                    "is_parsed_file": True,
-                    "format_type": format_type,
-                    "content_type": content_type
-                },
-                "status": "parsed",
-                "parent_file_uuid": file_id,  # Link to original file
-                "generation": original_file.get("generation", 0) + 1,
-                "lineage_depth": original_file.get("lineage_depth", 0) + 1
+            # ✅ OPTIMAL ARCHITECTURE: Store parsed file ONLY in parsed_data_files (not in project_files)
+            # 1. Store parsed file binary in GCS
+            # 2. Create entry ONLY in parsed_data_files with file_id linking back to original (for lineage)
+            # Dashboard service will query all three tables (project_files, parsed_data_files, embedding_files)
+            
+            # Generate UUID for parsed file
+            parsed_file_gcs_id = str(uuid.uuid4())
+            gcs_path = f"parsed_data/{parsed_file_gcs_id}.{format_type}"
+            
+            # Determine content type for GCS
+            content_type_map = {
+                "parquet": "application/parquet",
+                "jsonl": "application/x-ndjson",
+                "json_structured": "application/json",
+                "json_chunks": "application/json"
             }
+            gcs_content_type = content_type_map.get(format_type, "application/octet-stream")
             
-            # Store in GCS (via file_management_abstraction) FIRST to get actual UUID
-            self.logger.info(f"🔍 [store_parsed_file] Storing parsed file in GCS: format_type={format_type}, size={len(parsed_file_data)} bytes")
-            gcs_result = await self.service.file_management_abstraction.create_file(parsed_file_record)
-            parsed_file_gcs_id = gcs_result.get("uuid")
+            # Store parsed file binary in GCS
+            self.logger.info(f"🔍 [store_parsed_file] Storing parsed file binary in GCS: parsed_file_id={parsed_file_gcs_id}, format_type={format_type}, size={len(parsed_file_data)} bytes")
             
-            if not parsed_file_gcs_id:
-                raise ValueError("Failed to get UUID from GCS file creation - cannot store parsed file metadata")
+            gcs_adapter = self.service.file_management_abstraction.gcs_adapter
+            if not gcs_adapter:
+                raise ValueError("GCS adapter not available - cannot store parsed file")
             
-            # Create file link for cascade deletion - link original file (parent) to parsed file (child)
-            # This ensures parsed files are deleted when the original file is deleted
-            try:
-                await self.service.file_management_abstraction.create_file_link(
-                    parent_uuid=file_id,
-                    child_uuid=parsed_file_gcs_id,
-                    link_type="parsed_from"
-                )
-                self.logger.info(f"✅ [store_parsed_file] Created file link: {file_id} -> {parsed_file_gcs_id} (parsed_from)")
-            except Exception as link_error:
-                # Log warning but don't fail - link creation is for cleanup, not critical for functionality
-                self.logger.warning(f"⚠️ [store_parsed_file] Failed to create file link: {link_error}")
+            gcs_success = await gcs_adapter.upload_file(
+                blob_name=gcs_path,
+                file_data=parsed_file_data,
+                content_type=gcs_content_type,
+                metadata={
+                    "original_file_id": file_id,
+                    "user_id": user_id,
+                    "format_type": format_type,
+                    "content_type": content_type,
+                    "is_parsed_file": "true"
+                }
+            )
             
-            # Use the ACTUAL GCS file UUID as parsed_file_id (not a generated one)
+            if not gcs_success:
+                raise ValueError(f"Failed to upload parsed file to GCS: {gcs_path}")
+            
+            self.logger.info(f"✅ [store_parsed_file] Successfully stored parsed file binary in GCS: {gcs_path}")
+            
+            # Use the GCS file UUID as parsed_file_id
             parsed_file_id = parsed_file_gcs_id
-            gcs_path = f"parsed_data/{parsed_file_id}.{format_type}"
             
-            self.logger.info(f"✅ [store_parsed_file] Stored in GCS: parsed_file_id={parsed_file_id}, gcs_file_id={parsed_file_gcs_id}")
+            # ✅ OPTIMAL: No entry in project_files - only in parsed_data_files
             
             # Extract metadata from parse_result
             row_count = parse_result.get("row_count") or parse_result.get("structure", {}).get("row_count")
@@ -181,13 +180,19 @@ class ParsedFileProcessing:
             # Use the ACTUAL GCS file UUID as parsed_file_id (ensures lookups work correctly)
             # Include user_id and ui_name directly for simple queries (no JOIN needed)
             # ✅ STANDARDIZED: ui_name matches pattern from project_files and embedding_files
-            parsed_file_ui_name = parsed_file_record.get("ui_name")  # Already constructed above: f"parsed_{original_file.get('ui_name', file_id)}"
+            # Use original file's ui_name with "parsed_" prefix for consistency
+            original_ui_name = original_file.get("ui_name", file_id)
+            parsed_file_ui_name = f"parsed_{original_ui_name}"
+            
+            # ✅ OPTIMAL: Create entry ONLY in parsed_data_files table
+            # This is the single source of truth for parsed files
+            # Dashboard service will query this table along with project_files and embedding_files
+            original_ui_name = original_file.get("ui_name", file_id)
+            parsed_file_ui_name = f"parsed_{original_ui_name}"
             
             parsed_file_metadata = {
-                "file_id": file_id,
-                "parsed_file_id": parsed_file_id,  # ✅ FIXED: Use actual GCS UUID, not generated string
-                "user_id": user_id,  # ✅ NEW: Store user_id directly for simple queries
-                "ui_name": parsed_file_ui_name,  # ✅ NEW: Store ui_name directly for unified query pattern
+                "file_id": file_id,  # ✅ Lineage: Link back to original uploaded file
+                "parsed_file_id": parsed_file_id,  # GCS UUID for retrieving the binary
                 "data_classification": data_classification,
                 "tenant_id": tenant_id,
                 "format_type": format_type,
@@ -204,7 +209,9 @@ class ParsedFileProcessing:
                 "processing_status": "completed",  # Processing is complete (not pending)
                 "metadata": {
                     "gcs_file_id": parsed_file_gcs_id,  # Same as parsed_file_id
-                    "gcs_path": gcs_path
+                    "gcs_path": gcs_path,
+                    "user_id": user_id,  # ✅ Store in metadata for queries (schema doesn't have user_id column)
+                    "ui_name": parsed_file_ui_name  # ✅ Track by UI name as per user requirement (stored in metadata)
                 }
             }
             
@@ -340,70 +347,70 @@ class ParsedFileProcessing:
                 raise Exception("Infrastructure not connected")
             
             # Get metadata from Supabase parsed_data_files table
+            # ✅ Handle both parsed_data_files.uuid (from dashboard) and parsed_file_id (GCS identifier)
             supabase_adapter = self.service.file_management_abstraction.supabase_adapter
-            result = supabase_adapter.client.table("parsed_data_files").select("*").eq("parsed_file_id", parsed_file_id).execute()
+            
+            # Try querying by uuid first (what dashboard returns)
+            result = supabase_adapter.client.table("parsed_data_files").select("*").eq("uuid", parsed_file_id).execute()
+            
+            # If not found by uuid, try by parsed_file_id (GCS identifier)
+            if not result.data or len(result.data) == 0:
+                self.logger.info(f"🔍 [get_parsed_file] Not found by uuid, trying parsed_file_id: {parsed_file_id}")
+                result = supabase_adapter.client.table("parsed_data_files").select("*").eq("parsed_file_id", parsed_file_id).execute()
             
             if not result.data or len(result.data) == 0:
-                self.logger.warning(f"⚠️ Parsed file not found: {parsed_file_id}")
+                self.logger.warning(f"⚠️ Parsed file not found: {parsed_file_id} (tried both uuid and parsed_file_id)")
                 return None
             
             parsed_file_metadata = result.data[0]
             
-            # Get file data from GCS (via file_management_abstraction)
-            # The metadata contains gcs_file_id or we can construct the path
-            gcs_file_id = parsed_file_metadata.get("metadata", {}).get("gcs_file_id")
-            self.logger.info(f"🔍 [get_parsed_file] parsed_file_id={parsed_file_id}, gcs_file_id={gcs_file_id}")
+            # ✅ OPTIMAL: Get file data directly from GCS (parsed files are NOT in project_files)
+            gcs_path = parsed_file_metadata.get("metadata", {}).get("gcs_path")
+            if not gcs_path:
+                # Fallback: construct path from parsed_file_id and format_type
+                format_type = parsed_file_metadata.get("format_type", "parquet")
+                gcs_path = f"parsed_data/{parsed_file_id}.{format_type}"
             
-            if gcs_file_id:
-                self.logger.info(f"🔍 [get_parsed_file] Retrieving file from GCS: gcs_file_id={gcs_file_id}")
-                file_data = await self.service.file_management_abstraction.get_file(gcs_file_id)
-                if file_data:
-                    file_content = file_data.get("file_content")
-                    if file_content:
-                        # Validate format-specific magic bytes (if applicable)
-                        format_type = parsed_file_metadata.get("format_type", "jsonl")
-                        if format_type == "parquet" and isinstance(file_content, bytes) and len(file_content) >= 4:
-                            magic_bytes = file_content[:4]
-                            if magic_bytes == b'PAR1':
-                                self.logger.info(f"✅ [get_parsed_file] Retrieved valid parquet file: {len(file_content)} bytes")
-                            else:
-                                self.logger.error(f"❌ [get_parsed_file] Invalid parquet magic bytes: {magic_bytes} (expected PAR1)")
-                                self.logger.error(f"   Content type: {type(file_content)}, length: {len(file_content)}")
-                                self.logger.error(f"   First 20 bytes: {file_content[:20]}")
-                                self.logger.error(f"   file_data keys: {list(file_data.keys())}")
-                        elif format_type == "jsonl":
-                            # JSONL is text format, no magic bytes to validate
-                            if isinstance(file_content, bytes):
-                                try:
-                                    # Validate it's valid UTF-8
-                                    file_content.decode('utf-8')
-                                    self.logger.info(f"✅ [get_parsed_file] Retrieved valid JSONL file: {len(file_content)} bytes")
-                                except UnicodeDecodeError as e:
-                                    self.logger.error(f"❌ [get_parsed_file] Invalid JSONL (not UTF-8): {e}")
-                            else:
-                                self.logger.info(f"✅ [get_parsed_file] Retrieved JSONL file: {len(str(file_content))} chars")
-                        else:
-                            # Other formats (json_structured, json_chunks) - no validation needed
-                            self.logger.info(f"✅ [get_parsed_file] Retrieved {format_type} file: {len(file_content) if isinstance(file_content, bytes) else len(str(file_content))} bytes/chars")
+            self.logger.info(f"🔍 [get_parsed_file] Retrieving from GCS: {gcs_path}")
+            gcs_adapter = self.service.file_management_abstraction.gcs_adapter
+            if not gcs_adapter:
+                raise ValueError("GCS adapter not available - cannot retrieve parsed file")
+            
+            file_content = await gcs_adapter.download_file(gcs_path)
+            
+            if file_content:
+                # Validate format-specific magic bytes (if applicable)
+                format_type = parsed_file_metadata.get("format_type", "jsonl")
+                if format_type == "parquet" and isinstance(file_content, bytes) and len(file_content) >= 4:
+                    magic_bytes = file_content[:4]
+                    if magic_bytes == b'PAR1':
+                        self.logger.info(f"✅ [get_parsed_file] Retrieved valid parquet file: {len(file_content)} bytes")
                     else:
-                        self.logger.warning(f"⚠️ [get_parsed_file] Retrieved file has no file_content: keys={list(file_data.keys())}")
+                        self.logger.error(f"❌ [get_parsed_file] Invalid parquet magic bytes: {magic_bytes} (expected PAR1)")
+                        self.logger.error(f"   Content type: {type(file_content)}, length: {len(file_content)}")
+                        self.logger.error(f"   First 20 bytes: {file_content[:20]}")
+                elif format_type == "jsonl":
+                    # JSONL is text format, no magic bytes to validate
+                    if isinstance(file_content, bytes):
+                        try:
+                            # Validate it's valid UTF-8
+                            file_content.decode('utf-8')
+                            self.logger.info(f"✅ [get_parsed_file] Retrieved valid JSONL file: {len(file_content)} bytes")
+                        except UnicodeDecodeError as e:
+                            self.logger.error(f"❌ [get_parsed_file] Invalid JSONL (not UTF-8): {e}")
+                    else:
+                        self.logger.info(f"✅ [get_parsed_file] Retrieved JSONL file: {len(str(file_content))} chars")
                 else:
-                    self.logger.warning(f"⚠️ [get_parsed_file] File not found in GCS: gcs_file_id={gcs_file_id}")
+                    # Other formats (json_structured, json_chunks) - no validation needed
+                    self.logger.info(f"✅ [get_parsed_file] Retrieved {format_type} file: {len(file_content) if isinstance(file_content, bytes) else len(str(file_content))} bytes/chars")
             else:
-                # Fallback: construct path and try to get from GCS
-                gcs_path = parsed_file_metadata.get("metadata", {}).get("gcs_path")
-                if gcs_path:
-                    # TODO: Add method to get file by GCS path
-                    self.logger.warning(f"⚠️ [get_parsed_file] GCS file ID not found, cannot retrieve file data")
-                    file_data = None
-                else:
-                    self.logger.warning(f"⚠️ [get_parsed_file] Neither gcs_file_id nor gcs_path found in metadata")
-                    file_data = None
+                self.logger.warning(f"⚠️ [get_parsed_file] File not found in GCS: {gcs_path}")
+                file_content = None
             
             return {
                 "parsed_file_id": parsed_file_id,
                 "metadata": parsed_file_metadata,
-                "file_data": file_data.get("file_content") if file_data and file_data.get("file_content") else None,
+                "file_data": file_content,  # ✅ FIX: Return file_content directly from GCS
                 "format_type": parsed_file_metadata.get("format_type"),
                 "content_type": parsed_file_metadata.get("content_type")
             }
@@ -464,12 +471,27 @@ class ParsedFileProcessing:
                 query = query.eq("file_id", file_id)
             elif user_id:
                 # Filter by user_id (all parsed files for user)
-                # ✅ SIMPLIFIED: Query directly by user_id (no JOIN needed!)
-                self.logger.info(f"🔍 Querying parsed_data_files directly by user_id: {user_id}")
+                # ✅ FIX: user_id is stored in metadata JSONB, so we need to query all and filter
+                # OR use a JOIN with project_files to get user_id
+                self.logger.info(f"🔍 Querying parsed_data_files for user_id: {user_id}")
                 
-                result = supabase_adapter.client.table("parsed_data_files").select("*").eq("user_id", user_id).execute()
+                # Query all parsed files and filter by metadata->user_id (since user_id is in metadata JSONB)
+                # This is not ideal for performance, but works until we add user_id column to schema
+                result = supabase_adapter.client.table("parsed_data_files").select("*").execute()
+                parsed_files = []
+                if result.data:
+                    for pf in result.data:
+                        # Check if user_id matches in metadata
+                        metadata = pf.get("metadata", {})
+                        if isinstance(metadata, str):
+                            import json
+                            try:
+                                metadata = json.loads(metadata)
+                            except:
+                                metadata = {}
+                        if metadata.get("user_id") == user_id:
+                            parsed_files.append(pf)
                 
-                parsed_files = result.data if result.data else []
                 self.logger.info(f"✅ Found {len(parsed_files)} parsed files for user {user_id}")
                 return parsed_files
             else:

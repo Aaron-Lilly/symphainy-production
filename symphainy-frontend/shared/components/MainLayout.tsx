@@ -19,6 +19,7 @@ const InteractiveSecondaryChat = dynamic(() => import("./chatbot/InteractiveSeco
 });
 import { FileText, BarChart2, Settings, FlaskConical } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import TopNavBar from "./TopNavBar";
 import ChatbotToggleDemo from "@/components/examples/ChatbotToggleDemo";
 import { 
@@ -82,6 +83,51 @@ export default function MainLayout({ children }: MainLayoutProps) {
     }
   }, [authLoading, isAuthenticated, guideSessionToken, tokenMatches]);
   
+  // ✅ LAZY LOADING: State to control when chat panel should be loaded
+  // Persist in sessionStorage so it survives page refreshes
+  const [chatPanelRequested, setChatPanelRequested] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('chatPanelRequested') === 'true';
+    }
+    return false;
+  });
+  
+  // Update sessionStorage when chat panel is requested
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (chatPanelRequested) {
+        sessionStorage.setItem('chatPanelRequested', 'true');
+      } else {
+        sessionStorage.removeItem('chatPanelRequested');
+      }
+    }
+  }, [chatPanelRequested]);
+  
+  // ✅ Clear chatPanelRequested when user logs out (isAuthenticated becomes false)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !isAuthenticated && !authLoading) {
+      // User logged out - clear chat panel state
+      setChatPanelRequested(false);
+      sessionStorage.removeItem('chatPanelRequested');
+    }
+  }, [isAuthenticated, authLoading]);
+  
+  // Debug: Log auth state for troubleshooting button visibility
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[MainLayout] Auth state:', {
+        isAuthRoute,
+        authLoading,
+        isAuthenticated,
+        hasToken: !!guideSessionToken,
+        tokenLength: guideSessionToken?.length || 0,
+        tokenMatches,
+        authReady,
+        chatPanelRequested
+      });
+    }
+  }, [isAuthRoute, authLoading, isAuthenticated, guideSessionToken, tokenMatches, authReady, chatPanelRequested]);
+  
   const shouldRenderChat = 
     !isAuthRoute && // ✅ CRITICAL: Never render on auth routes, but allow landing page
     !authLoading && 
@@ -92,7 +138,8 @@ export default function MainLayout({ children }: MainLayoutProps) {
     guideSessionToken !== 'token_placeholder' &&
     guideSessionToken.length > 10 && // Ensure token is substantial (not just a few chars)
     tokenMatches && // ✅ CRITICAL: Token must match auth token
-    authReady; // ✅ CRITICAL: Wait for auth state to settle
+    authReady && // ✅ CRITICAL: Wait for auth state to settle
+    chatPanelRequested; // ✅ LAZY LOADING: Only render when user requests it
   const mainChatbotOpen = useAtomValue(mainChatbotOpenAtom);
   
   // Get derived atoms for animations
@@ -108,7 +155,52 @@ export default function MainLayout({ children }: MainLayoutProps) {
         {/* Main Content */}
         <div className="flex flex-row bg-gray-100 overflow-y-auto gap-6 p-4 md:p-8 mt-20">
           <div className="w-[72%] bg-gray-100">{children}</div>
-          <div className="w-[23%] bg-gray-100"></div>
+          <div className="w-[23%] bg-gray-100">
+            {/* ✅ LAZY LOADING: Show launch button if chat not requested, otherwise show chat panel */}
+            {/* Debug: Log button visibility conditions - Always log for troubleshooting */}
+            {(() => {
+              const canShowButton = !isAuthRoute && !authLoading && isAuthenticated && guideSessionToken && tokenMatches && authReady && !chatPanelRequested;
+              // Always log for troubleshooting (not just in development)
+              console.log('[MainLayout] Button visibility check:', {
+                isAuthRoute,
+                authLoading,
+                isAuthenticated,
+                hasToken: !!guideSessionToken,
+                tokenLength: guideSessionToken?.length || 0,
+                tokenMatches,
+                authReady,
+                chatPanelRequested,
+                canShowButton,
+                pathname
+              });
+              return canShowButton;
+            })() && (
+              <div className="sticky top-24 h-fit">
+                <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-6">
+                  <div className="flex flex-col items-center space-y-4">
+                    <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                      <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">Chat Experience</h3>
+                      <p className="text-sm text-gray-600 mb-4">
+                        Connect with our AI guide and liaison agents for assistance
+                      </p>
+                      <Button
+                        onClick={() => setChatPanelRequested(true)}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                        size="lg"
+                      >
+                        Launch Chat Experience
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       {/* Chatbot Container with Animations - Only render when fully authenticated with valid token */}

@@ -79,9 +79,10 @@ export class ContentAPIManager {
 
   async listFiles(): Promise<ContentFile[]> {
     try {
-      // Use semantic API path: /api/v1/content-pillar/list-uploaded-files
+      // ✅ OPTIMAL ARCHITECTURE: Use unified dashboard-files endpoint
+      // This endpoint returns files from all three tables (project_files, parsed_data_files, embedding_files)
       // ✅ Use authenticatedFetch for automatic token refresh on 401 errors
-      const response = await this.authenticatedFetch(`${this.baseURL}/api/v1/content-pillar/list-uploaded-files`, {
+      const response = await this.authenticatedFetch(`${this.baseURL}/api/v1/content-pillar/dashboard-files`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -97,20 +98,23 @@ export class ContentAPIManager {
       const backendFiles = data.files || [];
       
       // Map backend response to ContentFile format
-      // Backend returns: uuid, ui_name, file_type, size_bytes, uploaded_at, status, etc.
+      // Backend returns: uuid, ui_name, file_type, size, created_at, status, type ("original", "parsed", "embedded")
       // Frontend expects: id, name, type, size, uploadDate, status, metadata
       return backendFiles.map((file: any) => ({
         id: file.uuid || file.file_id || '',
         name: file.ui_name || file.original_filename || file.filename || 'Unnamed File',
         type: file.file_type || file.mime_type || '',
-        size: file.size_bytes || file.file_size || 0,
-        uploadDate: file.uploaded_at || file.created_at || new Date().toISOString(),
-        status: file.status || 'uploaded', // Use status from backend, default to 'uploaded'
+        size: file.size || file.size_bytes || file.file_size || 0,
+        uploadDate: file.created_at || file.uploaded_at || new Date().toISOString(),
+        status: file.status || (file.type === 'parsed' ? 'parsed' : file.type === 'embedded' ? 'embedded' : 'uploaded'), // Use status from backend, fallback to type
         metadata: {
           ...file,
+          file_type: file.type, // Store original type ("original", "parsed", "embedded")
           mime_type: file.mime_type,
           content_type: file.content_type,
-          parsed: file.parsed || false
+          parsed: file.type === 'parsed' || file.status === 'parsed',
+          original_file_id: file.original_file_id, // For parsed/embedded files
+          parsed_file_id: file.parsed_file_id // For embedded files
         }
       }));
     } catch (error) {
@@ -257,13 +261,17 @@ export class ContentAPIManager {
     }
   }
 
-  async deleteFile(fileId: string): Promise<boolean> {
+  async deleteFile(fileId: string, fileType?: string): Promise<boolean> {
     try {
-      // Use semantic API path: /api/v1/content-pillar/delete-file/{fileId}
-      // FrontendGatewayService will route this to ContentJourneyOrchestrator.delete_file()
-      // ✅ Use authenticatedFetch for automatic token refresh on 401 errors
-      const url = `${this.baseURL}/api/v1/content-pillar/delete-file/${fileId}`;
+      // Use semantic API path: /api/v1/content-pillar/delete-file/{fileId}?file_type=original|parsed|embedded
+      // FrontendGatewayService will route this to ContentJourneyOrchestrator.delete_file_by_type()
+      // ✅ OPTIMAL ARCHITECTURE: Pass file_type to determine which table to delete from
+      let url = `${this.baseURL}/api/v1/content-pillar/delete-file/${fileId}`;
+      if (fileType) {
+        url += `?file_type=${fileType}`;
+      }
       
+      // ✅ Use authenticatedFetch for automatic token refresh on 401 errors
       const response = await this.authenticatedFetch(url, {
         method: 'DELETE',
         headers: {

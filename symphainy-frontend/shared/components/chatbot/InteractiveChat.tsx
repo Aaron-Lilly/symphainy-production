@@ -17,17 +17,12 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { chatbotAgentInfoAtom, mainChatbotOpenAtom } from "@/shared/atoms/chatbot-atoms";
 import { useGlobalSession } from "@/shared/agui/GlobalSessionProvider";
 import { useAuth } from "@/shared/agui/AuthProvider";
-// useAgentManager will be dynamically imported to avoid SSR issues
+import { useUnifiedAgentChat } from "@/shared/hooks/useUnifiedAgentChat";
 
 export default function InteractiveChat() {
   const router = useRouter();
   const { guideSessionToken } = useGlobalSession();
   const { isAuthenticated } = useAuth();
-  
-  // Dynamic state for agent manager
-  const [agentManager, setAgentManager] = useState<any>(null);
-  const [agentLoading, setAgentLoading] = useState(true);
-  const [agentError, setAgentError] = useState<string | null>(null);
   
   const mainChatbotOpen = useAtomValue(mainChatbotOpenAtom);
   const setMainChatbotOpen = useSetAtom(mainChatbotOpenAtom);
@@ -47,116 +42,144 @@ export default function InteractiveChat() {
   const [agentData, setAgentData] = useState<any>(null);
   const [pillar, setPillar] = useState<string | null>(null);
 
-  // Dynamically load the agent manager - only if authenticated
+  // ✅ STRICT Safety check: Only use websocket if authenticated and have valid session token
+  // Additional check: ensure token is substantial (not just a few characters)
+  const shouldConnect = isAuthenticated && 
+    !!guideSessionToken && 
+    typeof guideSessionToken === 'string' && 
+    guideSessionToken.trim() !== '' && 
+    guideSessionToken !== 'token_placeholder' &&
+    guideSessionToken.length > 10; // Ensure token is substantial
+  
+  // Use unified agent chat hook for real backend communication - only if authenticated
+  // ✅ Option B: Defer connection until user interaction (don't auto-connect)
+  const {
+    messages: unifiedMessages,
+    isConnected: unifiedConnected,
+    sendMessage: sendUnifiedMessage,
+    isLoading: unifiedLoading,
+    error: unifiedError,
+    connect: connectWebSocket
+  } = useUnifiedAgentChat({
+    sessionToken: shouldConnect ? guideSessionToken : undefined,
+    autoConnect: false, // ✅ Don't auto-connect - wait for user interaction
+    initialAgent: 'guide',
+    onMessage: (msg) => {
+      // Add agent response to chat when received from WebSocket
+      setWsMessages((prev) => [
+        ...prev,
+        { 
+          type: "agent", 
+          content: msg.content || "No response", 
+          isComplete: true,
+          pillar: msg.pillar
+        },
+      ]);
+    },
+    onError: (error) => {
+      console.error('[InteractiveChat] WebSocket error:', error);
+      setWsMessages((prev) => [
+        ...prev,
+        { 
+          type: "agent", 
+          content: `Error: ${error}`, 
+          isComplete: true 
+        },
+      ]);
+    }
+  });
+
+  // Sync unified messages to local state
   useEffect(() => {
-    if (!isAuthenticated || !guideSessionToken) return;
+    // Filter for guide agent messages
+    const guideMessages = unifiedMessages.filter(msg => msg.agent_type === 'guide');
+    
+    // Update local messages with new unified messages
+    if (guideMessages.length > 0) {
+      const newMessages = guideMessages.map(msg => ({
+        type: msg.role === 'user' ? 'user' as const : 'agent' as const,
+        content: msg.content,
+        isComplete: true,
+        pillar: msg.pillar
+      }));
+      
+      // Only add messages we don't already have
+      setWsMessages(prev => {
+        const existingContents = new Set(prev.map(m => m.content));
+        const toAdd = newMessages.filter(m => !existingContents.has(m.content));
+        return [...prev, ...toAdd];
+      });
+    }
+  }, [unifiedMessages]);
 
-    const loadAgentManager = async () => {
-      try {
-        setAgentLoading(true);
-        setAgentError(null);
-
-        // Dynamically import the useAgentManager hook
-        const { useAgentManager } = await import("@/shared/hooks/useAgentManager");
-        
-        // Create a temporary component to use the hook
-        const AgentManagerWrapper = () => {
-          const manager = useAgentManager(guideSessionToken, "general");
-          return manager;
-        };
-
-        // For now, we'll simulate the manager state
-        // In a real implementation, we'd need to restructure this
-        setAgentManager({
-          isConnected: true,
-          isLoading: false,
-          error: null,
-          sendToGuideAgent: async (message: string) => ({ success: true, content: "Response from guide agent" }),
-          sendToContentAgent: async (message: string) => ({ success: true, content: "Response from content agent" }),
-          sendToInsightsAgent: async (message: string) => ({ success: true, content: "Response from insights agent" }),
-          sendToOperationsAgent: async (message: string) => ({ success: true, content: "Response from operations agent" }),
-          sendToExperienceAgent: async (message: string) => ({ success: true, content: "Response from experience agent" }),
-        });
-      } catch (error: any) {
-        console.error("Failed to load agent manager:", error);
-        setAgentError(error.message || "Failed to load agent manager");
-      } finally {
-        setAgentLoading(false);
-      }
-    };
-
-    loadAgentManager();
-  }, [isAuthenticated, guideSessionToken]);
+  // ✅ Connect WebSocket when chat panel is opened (lazy connection)
+  useEffect(() => {
+    // Connect when main chatbot is opened and we're ready
+    if (shouldConnect && !unifiedConnected && !unifiedLoading && guideSessionToken && mainChatbotOpen) {
+      console.log('[InteractiveChat] Connecting WebSocket - chat panel opened');
+      connectWebSocket().catch(err => {
+        console.error('[InteractiveChat] Failed to connect:', err);
+      });
+    }
+  }, [shouldConnect, unifiedConnected, unifiedLoading, guideSessionToken, mainChatbotOpen, connectWebSocket]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim() || !agentManager) return;
+    
+    // ✅ Connect if not already connected (lazy connection on first message)
+    if (shouldConnect && !unifiedConnected && !unifiedLoading && guideSessionToken) {
+      console.log('[InteractiveChat] Connecting WebSocket before sending message');
+      try {
+        await connectWebSocket();
+        // Wait a moment for connection to establish
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (err) {
+        console.error('[InteractiveChat] Failed to connect WebSocket:', err);
+        setWsMessages((prev) => [
+          ...prev,
+          { 
+            type: "agent", 
+            content: `Error: Failed to connect to chat service. Please try again.`, 
+            isComplete: true 
+          },
+        ]);
+        return;
+      }
+    }
+    
+    // ✅ Safety check: Don't send if not authenticated or not connected
+    if (!message.trim() || !shouldConnect || !guideSessionToken || !unifiedConnected) {
+      if (!shouldConnect) {
+        console.warn("Cannot send message: not authenticated");
+      } else if (!unifiedConnected) {
+        console.error("Unified agent chat is not connected - connection may still be establishing");
+        setWsMessages((prev) => [
+          ...prev,
+          { 
+            type: "agent", 
+            content: `Connecting to chat service... Please wait a moment and try again.`, 
+            isComplete: true 
+          },
+        ]);
+      }
+      return;
+    }
 
     setLoading(true);
 
-    // Determine current pillar from URL or agent data
-    const currentPillar = agentData?.pillar || "general";
-    const agentType = currentPillar === "general" ? "guide" : currentPillar;
-
     try {
-      // Use agent manager to send message
-      let response;
-      switch (agentType) {
-        case "guide":
-          response = await agentManager.sendToGuideAgent(message);
-          break;
-        case "content":
-          response = await agentManager.sendToContentAgent(message);
-          break;
-        case "insights":
-          response = await agentManager.sendToInsightsAgent(message);
-          break;
-        case "operations":
-          response = await agentManager.sendToOperationsAgent(message);
-          break;
-        case "experience":
-          response = await agentManager.sendToExperienceAgent(message);
-          break;
-        default:
-          response = await agentManager.sendToGuideAgent(message);
-      }
-
       // Add user message to chat
       setWsMessages((prev) => [
         ...prev,
         { type: "user", content: message, isComplete: true },
       ]);
 
-      // Add agent response to chat
-      if (response.success) {
-        setWsMessages((prev) => [
-          ...prev,
-          { 
-            type: "agent", 
-            content: response.content || "No response", 
-            isComplete: true,
-            pillar: response.current_pillar
-          },
-        ]);
-
-        // Update agent data
-        if (response.agent) {
-          setAgentData({ agent: response.agent, pillar: response.current_pillar });
-        }
-      } else {
-        setWsMessages((prev) => [
-          ...prev,
-          { 
-            type: "agent", 
-            content: `Error: ${response.error || "Unknown error"}`, 
-            isComplete: true 
-          },
-        ]);
-      }
-
+      // Send message via unified WebSocket
+      await sendUnifiedMessage(message, 'guide');
       setMessage("");
+      console.log(`✅ Message sent to guide agent via unified websocket`);
     } catch (error: any) {
-      console.error("Error sending message:", error);
+      console.error("❌ Failed to send message to guide agent:", error);
       setWsMessages((prev) => [
         ...prev,
         { 
@@ -178,25 +201,32 @@ export default function InteractiveChat() {
     );
   };
 
-  // Show loading state if agent manager is still loading
-  if (agentLoading) {
+  // Show loading state if WebSocket is connecting
+  if (unifiedLoading && !unifiedConnected) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-          <p className="text-sm text-gray-500">Initializing chat...</p>
+          <p className="text-sm text-gray-500">Connecting to chat service...</p>
         </div>
       </div>
     );
   }
 
-  // Show error state if agent manager failed to initialize
-  if (agentError) {
+  // Show error state if WebSocket connection failed
+  if (unifiedError && !unifiedConnected) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
-          <p className="text-sm text-red-500 mb-2">Chat initialization failed</p>
-          <p className="text-xs text-gray-500">{agentError}</p>
+          <p className="text-sm text-red-500 mb-2">Chat connection failed</p>
+          <p className="text-xs text-gray-500">{unifiedError}</p>
+          <Button 
+            onClick={() => connectWebSocket()} 
+            className="mt-2"
+            size="sm"
+          >
+            Retry Connection
+          </Button>
         </div>
       </div>
     );
@@ -274,14 +304,14 @@ export default function InteractiveChat() {
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Ask me anything..."
             className="flex-1 text-sm"
-            disabled={loading || !agentManager?.isConnected}
+            disabled={loading || !unifiedConnected}
             aria-label="Send message to Guide Agent"
           />
           <Button
             data-testid="submit-message-to-guide-agent"
             type="submit"
             size="sm"
-            disabled={loading || !message.trim() || !agentManager?.isConnected}
+            disabled={loading || !message.trim() || !unifiedConnected}
             className="px-3"
             aria-label="Submit message to Guide Agent"
           >
@@ -292,8 +322,13 @@ export default function InteractiveChat() {
             )}
           </Button>
         </form>
-        {!agentManager?.isConnected && (
-          <p className="text-xs text-red-500 mt-1">Connecting to chat service...</p>
+        {!unifiedConnected && shouldConnect && (
+          <p className="text-xs text-yellow-500 mt-1">
+            {unifiedLoading ? "Connecting to chat service..." : "Click to connect to chat service"}
+          </p>
+        )}
+        {unifiedError && (
+          <p className="text-xs text-red-500 mt-1">{unifiedError}</p>
         )}
       </div>
     </>

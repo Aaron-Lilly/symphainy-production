@@ -244,3 +244,10 @@ local/
 **/temp/
 **/cache/
 **/.cache/
+
+# Documentation files with secrets
+docs/11-11/10-10/CONFIGURATION_REFACTORING_PLAN.md
+docs/11-11/10-11/envforaaronv1.md
+docs/11-11/10-11/envforaaronv1_minimal.md
+symphainy-platform/docs/111125_archive/CONFIGURATION_GUIDE.md
+tests_old_archive/integration/layer_8_business_enablement/SYNC_ENV_SECRETS_RECOMMENDATION.md

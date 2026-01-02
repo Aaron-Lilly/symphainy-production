@@ -62,9 +62,8 @@ services:
     depends_on:
       - consul
     healthcheck:
-      # Use wget to check Traefik ping endpoint (wget is available in Traefik v3.0 image)
-      # Alternative: Use API endpoint if ping fails: http://127.0.0.1:8080/api/rawdata
-      test: ["CMD", "wget", "--spider", "--tries=1", "--no-verbose", "--timeout=5", "http://127.0.0.1:8080/ping"]
+      # Use Traefik API endpoint for health check (ping endpoint may not be available in v3.0)
+      test: ["CMD", "wget", "--spider", "--tries=1", "--no-verbose", "--timeout=5", "http://127.0.0.1:8080/api/rawdata"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -271,12 +270,12 @@ services:
       consul:
         condition: service_started
     healthcheck:
-      # Use /status endpoint which is available immediately, not /ready which has 15s delay
-      test: ["CMD", "wget", "--spider", "-q", "-O", "/dev/null", "http://localhost:3200/status"]
+      # Use /ready endpoint - Tempo needs time to initialize, /status may not be sufficient
+      test: ["CMD", "wget", "--spider", "-q", "-O", "/dev/null", "http://localhost:3200/ready"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   # OpenTelemetry Collector
@@ -409,34 +408,35 @@ services:
     restart: unless-stopped
 
   # Cobrix Parser - COBOL/Mainframe File Parsing Service
-  cobrix-parser:
-    build:
-      context: ./services/cobrix-parser
-      dockerfile: Dockerfile
-    container_name: symphainy-cobrix-parser
-    networks:
-      - smart_city_net
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    healthcheck:
-      test: ["CMD", "java", "-jar", "/opt/cobrix/cobrix.jar", "--version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        labels: "service,parsing"
+  # NOTE: Deferred to future release - legacy mainframe/binary parser is working better
+  # cobrix-parser:
+  #   build:
+  #     context: ./services/cobrix-parser
+  #     dockerfile: Dockerfile
+  #   container_name: symphainy-cobrix-parser
+  #   networks:
+  #     - smart_city_net
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '2.0'
+  #         memory: 2G
+  #       reservations:
+  #         cpus: '0.5'
+  #         memory: 512M
+  #   healthcheck:
+  #     test: ["CMD", "java", "-jar", "/opt/cobrix/cobrix.jar", "--version"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 20s
+  #   restart: unless-stopped
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+  #       labels: "service,parsing"
 
   # Celery Worker - Background Task Processing
   celery-worker:
@@ -612,6 +612,7 @@ services:
       - "traefik.http.routers.backend-auth.rule=PathPrefix(`/api/auth`) || Path(`/api/health`) || Path(`/api/v1/session/create-user-session`)"
       - "traefik.http.routers.backend-auth.entrypoints=web"
       - "traefik.http.routers.backend-auth.service=backend"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"  # Service definition for backend
       - "traefik.http.routers.backend-auth.middlewares=backend-chain@file"
       - "traefik.http.routers.backend-auth.priority=100"  # HIGH priority to match auth routes FIRST
       
@@ -654,19 +655,19 @@ services:
       context: ./symphainy-frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-${API_URL:-http://localhost}}
-        - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-${API_URL:-http://localhost}}
-        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-${API_URL:-http://localhost}}
+        - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-${API_URL:-http://35.215.64.103}}
+        - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-${API_URL:-http://35.215.64.103}}
+        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-${API_URL:-http://35.215.64.103}}
     container_name: symphainy-frontend-prod
     # Ports removed - routing through Traefik only
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       # Traefik routes: Backend API accessible via /api path or api.localhost
       # Base URL should NOT include /api since code paths already include /api
-      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-${API_URL:-http://localhost}}
-      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-${API_URL:-http://localhost}}
-      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-${API_URL:-http://localhost}}
-      - NEXT_PUBLIC_FRONTEND_URL=${NEXT_PUBLIC_FRONTEND_URL:-${FRONTEND_URL:-http://localhost}}
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-${API_URL:-http://35.215.64.103}}
+      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-${API_URL:-http://35.215.64.103}}
+      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-${API_URL:-http://35.215.64.103}}
+      - NEXT_PUBLIC_FRONTEND_URL=${NEXT_PUBLIC_FRONTEND_URL:-${FRONTEND_URL:-http://35.215.64.103}}
       - PORT=3000
       - HOSTNAME=0.0.0.0
     deploy:

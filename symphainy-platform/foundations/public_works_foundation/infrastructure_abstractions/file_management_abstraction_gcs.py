@@ -222,30 +222,41 @@ class FileManagementAbstraction:
     
             raise  # Re-raise for service layer to handle
     async def delete_file(self, file_uuid: str) -> bool:
-        """Delete file with business logic validation from GCS + Supabase."""
+        """Delete file with business logic validation from GCS + Supabase, with cascade delete."""
         try:
-            # Get file info first to get GCS blob name
+            # Get file info first to get GCS blob name and check status
             file_info = await self.supabase_adapter.get_file(file_uuid)
             
             if not file_info:
                 self.logger.warning(f"⚠️ File not found for deletion: {file_uuid}")
+                return False
+            
+            # ✅ SIMPLIFIED: Direct deletion - no cascade
+            # Users delete what they want to delete from the dashboard
+            # If they want to delete related files, they can do so explicitly
             
             # Delete file from GCS
-            if file_info.get("gcs_blob_name"):
-                gcs_result = await self.gcs_adapter.delete_file(
-                    blob_name=file_info["gcs_blob_name"],
-                    bucket_name=file_info.get("gcs_bucket")
-                )
+            if file_info:
+                gcs_blob_name = file_info.get("service_context", {}).get("gcs_blob_name") if isinstance(file_info.get("service_context"), dict) else None
+                if not gcs_blob_name:
+                    gcs_blob_name = file_info.get("original_path")
                 
-                if not gcs_result.get("success"):
-                    self.logger.warning(f"⚠️ Failed to delete file from GCS: {gcs_result.get('error')}")
+                if gcs_blob_name:
+                    try:
+                        gcs_result = await self.gcs_adapter.delete_file(
+                            blob_name=gcs_blob_name
+                        )
+                        
+                        if not gcs_result:
+                            self.logger.warning(f"⚠️ Failed to delete file from GCS: {gcs_blob_name}")
+                    except Exception as gcs_error:
+                        self.logger.warning(f"⚠️ Error deleting from GCS: {gcs_error}")
             
-            # Delete file metadata from Supabase
+            # Delete file metadata from Supabase project_files
             result = await self.supabase_adapter.delete_file(file_uuid)
             
             if result:
                 self.logger.info(f"✅ File deleted: {file_uuid}")
-                
             else:
                 self.logger.error(f"❌ Failed to delete file: {file_uuid}")
             

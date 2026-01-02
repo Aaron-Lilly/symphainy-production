@@ -551,11 +551,16 @@ class ContentStewardService(SmartCityRoleBase, ContentStewardServiceProtocol):
             tenant_id = user_context.get("tenant_id") if user_context else None
             
             # Get uploaded file count
+            # ✅ FIX: Exclude files with status="parsed" (these are old duplicate entries from before the fix)
+            # Also exclude files with ui_name starting with "parsed_" (legacy entries)
             uploaded_files = await self.file_management_abstraction.list_files(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 filters={"status": "uploaded", "deleted": False}
             )
+            # Filter out any parsed files that might have been created in project_files (legacy entries)
+            if uploaded_files:
+                uploaded_files = [f for f in uploaded_files if f.get("status") == "uploaded" and not f.get("ui_name", "").startswith("parsed_")]
             uploaded_count = len(uploaded_files) if uploaded_files else 0
             
             # Get parsed file count
@@ -580,6 +585,241 @@ class ContentStewardService(SmartCityRoleBase, ContentStewardServiceProtocol):
                 "parsed": 0,
                 "embedded": 0,
                 "total": 0
+            }
+    
+    # ============================================================================
+    # DASHBOARD SERVICE METHODS (OPTIMAL ARCHITECTURE)
+    # ============================================================================
+    
+    async def get_dashboard_files(
+        self,
+        user_id: str,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get unified file list for dashboard from all three tables.
+        
+        This is the optimal architecture: dashboard service queries all three tables
+        (project_files, parsed_data_files, embedding_files) and composes a unified view.
+        
+        Args:
+            user_id: User identifier
+            user_context: Optional user context
+            
+        Returns:
+            Dict with files list and statistics
+        """
+        try:
+            if not self.is_infrastructure_connected:
+                raise Exception("Infrastructure not connected")
+            
+            if not self.file_management_abstraction:
+                raise Exception("File management abstraction not available")
+            
+            tenant_id = user_context.get("tenant_id") if user_context else None
+            files = []
+            
+            # 1. Get original uploaded files from project_files (status="uploaded" only)
+            uploaded_files = await self.file_management_abstraction.list_files(
+                user_id=user_id,
+                tenant_id=tenant_id,
+                filters={"status": "uploaded", "deleted": False}
+            )
+            for f in uploaded_files:
+                files.append({
+                    "uuid": f["uuid"],
+                    "ui_name": f.get("ui_name", f.get("filename", "")),
+                    "status": "uploaded",
+                    "file_type": f.get("file_type", ""),
+                    "mime_type": f.get("mime_type", ""),
+                    "size": f.get("file_size", 0),
+                    "created_at": f.get("created_at", f.get("uploaded_at", "")),
+                    "type": "original"
+                })
+            
+            # 2. Get parsed files from parsed_data_files
+            parsed_files = await self.list_parsed_files(user_id=user_id, user_context=user_context)
+            for pf in parsed_files:
+                # Extract ui_name from metadata (since it's stored there)
+                metadata = pf.get("metadata", {})
+                if isinstance(metadata, str):
+                    import json
+                    try:
+                        metadata = json.loads(metadata)
+                    except:
+                        metadata = {}
+                
+                ui_name = metadata.get("ui_name") or f"parsed_{pf.get('parsed_file_id', '')}"
+                
+                files.append({
+                    "uuid": pf["uuid"],  # parsed_data_files.uuid
+                    "ui_name": ui_name,
+                    "status": "parsed",
+                    "file_type": pf.get("format_type", ""),
+                    "mime_type": f"application/{pf.get('format_type', '')}",
+                    "size": pf.get("file_size", 0),
+                    "created_at": pf.get("parsed_at", pf.get("created_at", "")),
+                    "original_file_id": pf.get("file_id"),  # Link to original
+                    "type": "parsed"
+                })
+            
+            # 3. Get embedded files from embedding_files
+            embedded_files = await self.list_embedding_files(user_id=user_id, user_context=user_context)
+            for ef in embedded_files:
+                files.append({
+                    "uuid": ef.get("uuid", ef.get("content_id", "")),  # embedding_files.uuid
+                    "ui_name": ef.get("ui_name", f"embeddings_{ef.get('parsed_file_id', '')}"),
+                    "status": "embedded",
+                    "file_type": "embeddings",
+                    "mime_type": "application/json",
+                    "size": ef.get("size", 0),
+                    "created_at": ef.get("created_at", ""),
+                    "parsed_file_id": ef.get("parsed_file_id"),  # Link to parsed file
+                    "original_file_id": ef.get("file_id"),  # Link to original
+                    "type": "embedded"
+                })
+            
+            # Sort by created_at (most recent first)
+            files.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            
+            # Calculate statistics
+            statistics = {
+                "uploaded": len([f for f in files if f["type"] == "original"]),
+                "parsed": len([f for f in files if f["type"] == "parsed"]),
+                "embedded": len([f for f in files if f["type"] == "embedded"]),
+                "total": len(files)
+            }
+            
+            return {
+                "success": True,
+                "files": files,
+                "statistics": statistics
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get dashboard files: {e}", exc_info=True)
+            return {
+                "success": False,
+                "files": [],
+                "statistics": {"uploaded": 0, "parsed": 0, "embedded": 0, "total": 0},
+                "error": str(e)
+            }
+    
+    async def delete_file_by_type(
+        self,
+        file_uuid: str,
+        file_type: str,  # "original", "parsed", or "embedded"
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Delete file directly from its table and storage.
+        No cascade - users delete what they want to delete.
+        
+        Args:
+            file_uuid: UUID of file to delete
+            file_type: "original", "parsed", or "embedded"
+        """
+        try:
+            if not self.is_infrastructure_connected:
+                raise Exception("Infrastructure not connected")
+            
+            if file_type == "original":
+                # Delete from project_files and GCS
+                result = await self.file_management_abstraction.delete_file(file_uuid)
+                return {
+                    "success": result,
+                    "file_uuid": file_uuid,
+                    "file_type": file_type,
+                    "message": "Original file deleted"
+                }
+                
+            elif file_type == "parsed":
+                # Get parsed file metadata from parsed_data_files table (using uuid column)
+                supabase_adapter = self.file_management_abstraction.supabase_adapter
+                result = supabase_adapter.client.table("parsed_data_files").select("*").eq("uuid", file_uuid).execute()
+                
+                if not result.data or len(result.data) == 0:
+                    return {
+                        "success": False,
+                        "error": f"Parsed file not found: {file_uuid}"
+                    }
+                
+                parsed_file_metadata = result.data[0]
+                
+                # Get GCS path from metadata
+                metadata = parsed_file_metadata.get("metadata", {})
+                if isinstance(metadata, str):
+                    import json
+                    try:
+                        metadata = json.loads(metadata)
+                    except:
+                        metadata = {}
+                
+                gcs_path = metadata.get("gcs_path")
+                if not gcs_path:
+                    # Fallback: construct path from parsed_file_id and format_type
+                    parsed_file_id = parsed_file_metadata.get("parsed_file_id")
+                    format_type = parsed_file_metadata.get("format_type", "parquet")
+                    gcs_path = f"parsed_data/{parsed_file_id}.{format_type}"
+                
+                # Delete from GCS
+                if gcs_path:
+                    gcs_adapter = self.file_management_abstraction.gcs_adapter
+                    if gcs_adapter:
+                        gcs_result = await gcs_adapter.delete_file(gcs_path)
+                        if gcs_result.get("success"):
+                            self.logger.info(f"✅ [delete_file_by_type] Deleted from GCS: {gcs_path}")
+                        else:
+                            self.logger.warning(f"⚠️ [delete_file_by_type] Failed to delete from GCS: {gcs_path}")
+                
+                # Delete from parsed_data_files (hard delete)
+                supabase_adapter.client.table("parsed_data_files").delete().eq("uuid", file_uuid).execute()
+                
+                self.logger.info(f"✅ [delete_file_by_type] Deleted parsed file: {file_uuid}")
+                return {
+                    "success": True,
+                    "file_uuid": file_uuid,
+                    "file_type": file_type,
+                    "message": "Parsed file deleted"
+                }
+                
+            elif file_type == "embedded":
+                # Get embedding metadata
+                embedding_files = await self.list_embedding_files(user_id=None, parsed_file_id=None, file_id=None, user_context=user_context)
+                embedding_file = next((ef for ef in embedding_files if ef.get("uuid") == file_uuid or ef.get("content_id") == file_uuid), None)
+                
+                if not embedding_file:
+                    return {
+                        "success": False,
+                        "error": f"Embedding file not found: {file_uuid}"
+                    }
+                
+                # Delete embeddings from ArangoDB (if needed)
+                # Note: Implementation depends on how embeddings are stored
+                # For now, we'll just delete from embedding_files table
+                
+                # Delete from embedding_files
+                supabase_adapter = self.file_management_abstraction.supabase_adapter
+                supabase_adapter.client.table("embedding_files").delete().eq("uuid", file_uuid).execute()
+                
+                self.logger.info(f"✅ [delete_file_by_type] Deleted embedding file: {file_uuid}")
+                return {
+                    "success": True,
+                    "file_uuid": file_uuid,
+                    "file_type": file_type,
+                    "message": "Embedding file deleted"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Invalid file_type: {file_type}. Must be 'original', 'parsed', or 'embedded'"
+                }
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to delete file {file_uuid} (type: {file_type}): {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
             }
     
     # ============================================================================

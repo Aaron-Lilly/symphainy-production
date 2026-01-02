@@ -93,6 +93,7 @@ export function FileDashboard({
         const statusLower = statusStr.toLowerCase();
         if (statusLower === 'parsed') return FileStatus.Parsed;
         if (statusLower === 'validated') return FileStatus.Validated;
+        if (statusLower === 'embedded') return FileStatus.Validated; // Map "embedded" to Validated for UI
         if (statusLower === 'parsing') return FileStatus.Parsing;
         return FileStatus.Uploaded; // Default to Uploaded
       };
@@ -189,7 +190,14 @@ export function FileDashboard({
       const sessionToken = guideSessionToken || 'debug-token';
       const apiManager = new ContentAPIManager(sessionToken);
       
-      const success = await apiManager.deleteFile(fileId);
+      // ✅ OPTIMAL ARCHITECTURE: Determine file type from metadata
+      // Backend returns file.type as "original", "parsed", or "embedded" in the unified dashboard response
+      // This is stored in metadata.file_type by ContentAPIManager.listFiles()
+      const fileType = file.metadata?.file_type || 
+                       (file.status === FileStatus.Parsed ? 'parsed' : 
+                        (file.status === FileStatus.Validated && file.metadata?.parsed_file_id ? 'embedded' : 'original'));
+      
+      const success = await apiManager.deleteFile(fileId, fileType);
 
       if (success) {
         const updatedFiles = files.filter(f => (f.file_id || f.uuid) !== fileId);

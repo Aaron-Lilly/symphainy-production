@@ -136,6 +136,12 @@ export function useUnifiedAgentChat(
       setError(null);
 
       const wsURL = getWebSocketURLCallback();
+      console.log('🔌 [useUnifiedAgentChat] Connecting to WebSocket:', {
+        url: wsURL.replace(/\?session_token=.*/, '?session_token=***'), // Mask token in logs
+        hasToken: !!sessionToken,
+        tokenLength: sessionToken?.length || 0
+      });
+      
       const ws = new WebSocket(wsURL);
       
       // ✅ Register connection in registry
@@ -157,6 +163,24 @@ export function useUnifiedAgentChat(
       ws.onmessage = (event) => {
         try {
           const response = JSON.parse(event.data);
+          
+          // ✅ Handle heartbeat ping (keepalive) - respond with pong
+          if (response.type === 'heartbeat' && response.action === 'ping') {
+            // Respond to server heartbeat ping
+            try {
+              ws.send(JSON.stringify({
+                type: 'heartbeat',
+                action: 'pong',
+                timestamp: Date.now(),
+                connection_id: response.connection_id
+              }));
+              // Don't update UI state for heartbeat - it's just keepalive
+              return;
+            } catch (pongError) {
+              console.warn('[useUnifiedAgentChat] Failed to send heartbeat pong:', pongError);
+            }
+            return;
+          }
           
           // Handle error responses
           if (response.type === 'error') {
@@ -207,27 +231,65 @@ export function useUnifiedAgentChat(
       };
 
       ws.onerror = (error) => {
-        console.error('Unified Agent WebSocket error:', error);
-        setError('WebSocket connection error');
+        console.error('❌ Unified Agent WebSocket error:', error);
+        console.error('   WebSocket URL:', wsURL);
+        console.error('   Session Token:', sessionToken ? `${sessionToken.substring(0, 20)}...` : 'missing');
+        console.error('   Ready State:', ws.readyState);
+        
+        // Provide more specific error messages
+        let errorMessage = 'WebSocket connection error';
+        if (ws.readyState === WebSocket.CONNECTING) {
+          errorMessage = 'Failed to establish WebSocket connection. Please check your network connection.';
+        } else if (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
+          errorMessage = 'WebSocket connection closed unexpectedly. Please try reconnecting.';
+        }
+        
+        setError(errorMessage);
         setIsConnected(false);
         setIsLoading(false);
         if (onError) {
-          onError('WebSocket connection error');
+          onError(errorMessage);
         }
       };
 
       ws.onclose = (event) => {
-        console.log('Unified Agent WebSocket disconnected:', event.code, event.reason);
+        console.log('🔌 Unified Agent WebSocket disconnected:', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+          readyState: ws.readyState
+        });
+        
         setIsConnected(false);
         setIsLoading(false);
         wsRef.current = null;
+
+        // Provide user-friendly error messages based on close codes
+        if (event.code !== 1000) {
+          let errorMessage = 'WebSocket connection closed';
+          if (event.code === 4003) {
+            errorMessage = 'Connection rejected: Origin not allowed';
+          } else if (event.code === 4004) {
+            errorMessage = 'Connection rejected: Connection limit exceeded';
+          } else if (event.code === 4005) {
+            errorMessage = 'Connection rejected: Server at capacity';
+          } else if (event.code === 1006) {
+            errorMessage = 'Connection closed abnormally. Please check your network connection.';
+          } else if (event.code === 1011) {
+            errorMessage = 'Server error. Please try again later.';
+          }
+          setError(errorMessage);
+          if (onError) {
+            onError(errorMessage);
+          }
+        }
 
         // ✅ Only auto-reconnect if autoConnect is enabled AND not intentionally closed
         // This prevents retry loops when connection is deferred (Option B)
         if (autoConnect && event.code !== 1000 && reconnectAttemptsRef.current < maxReconnectAttempts) {
           reconnectAttemptsRef.current += 1;
           const delay = reconnectDelay * reconnectAttemptsRef.current;
-          console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`);
+          console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`);
           
           reconnectTimeoutRef.current = setTimeout(() => {
             connect();

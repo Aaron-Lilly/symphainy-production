@@ -2820,6 +2820,110 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 "error": str(e)
             }
     
+    async def get_dashboard_files(
+        self,
+        user_id: str,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get unified file list for dashboard from all three tables (OPTIMAL ARCHITECTURE).
+        
+        This is the optimal architecture: dashboard service queries all three tables
+        (project_files, parsed_data_files, embedding_files) and composes a unified view.
+        
+        Args:
+            user_id: User identifier
+            user_context: Optional user context
+        
+        Returns:
+            Dict with files list and statistics
+        """
+        try:
+            self.logger.info(f"📋 Getting dashboard files for user: {user_id}")
+            
+            # Get user context
+            from utilities.security_authorization.request_context import get_request_user_context
+            ctx = user_context or get_request_user_context()
+            
+            # Use ContentStewardService
+            content_steward = await self.get_content_steward_api()
+            if not content_steward:
+                return {
+                    "success": False,
+                    "files": [],
+                    "statistics": {"uploaded": 0, "parsed": 0, "embedded": 0, "total": 0},
+                    "error": "Content Steward service not available"
+                }
+            
+            # Get dashboard files via ContentStewardService
+            result = await content_steward.get_dashboard_files(user_id=user_id, user_context=ctx)
+            
+            self.logger.info(f"✅ Dashboard files retrieved: {result.get('statistics', {})}")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Get dashboard files failed: {e}", exc_info=True)
+            return {
+                "success": False,
+                "files": [],
+                "statistics": {"uploaded": 0, "parsed": 0, "embedded": 0, "total": 0},
+                "error": str(e)
+            }
+    
+    async def delete_file_by_type(
+        self,
+        file_uuid: str,
+        file_type: str,
+        user_id: str,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Delete file directly from its table and storage (OPTIMAL ARCHITECTURE).
+        No cascade - users delete what they want to delete.
+        
+        Args:
+            file_uuid: UUID of file to delete
+            file_type: "original", "parsed", or "embedded"
+            user_id: User identifier
+            user_context: Optional user context
+        
+        Returns:
+            Delete result
+        """
+        try:
+            self.logger.info(f"🗑️ Deleting file: {file_uuid} (type: {file_type})")
+            
+            # Get user context
+            from utilities.security_authorization.request_context import get_request_user_context
+            ctx = user_context or get_request_user_context()
+            
+            # Use ContentStewardService
+            content_steward = await self.get_content_steward_api()
+            if not content_steward:
+                return {
+                    "success": False,
+                    "error": "Content Steward service not available"
+                }
+            
+            # Delete file via ContentStewardService
+            result = await content_steward.delete_file_by_type(
+                file_uuid=file_uuid,
+                file_type=file_type,
+                user_context=ctx
+            )
+            
+            self.logger.info(f"✅ File deleted: {file_uuid} (type: {file_type})")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Delete file failed: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
     async def get_file_statistics(
         self,
         user_id: str
@@ -3243,12 +3347,14 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             self.logger.info(f"🔀 [handle_request] {method} {path} for user: {user_id}")
             
             # Route based on method and path
-            # DELETE /delete-file/{file_id}
+            # DELETE /delete-file/{file_id}?file_type=original|parsed|embedded (OPTIMAL ARCHITECTURE)
             if method == "DELETE" and path.startswith("delete-file/"):
                 file_id = path.replace("delete-file/", "").split("/")[0]
                 if not file_id:
                     return {"success": False, "error": "file_id is required"}
-                return await self.delete_file(file_id, user_id)
+                # Get file_type from query params (default to "original" for backward compatibility)
+                file_type = query_params.get("file_type", "original") if query_params else "original"
+                return await self.delete_file_by_type(file_id, file_type, user_id, user_context)
             
             # POST /process-file or POST /process-file/{file_id}
             elif method == "POST" and (path == "process-file" or path.startswith("process-file/")):
@@ -3271,6 +3377,10 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             # GET /get-file-statistics
             elif method == "GET" and path == "get-file-statistics":
                 return await self.get_file_statistics(user_id)
+            
+            # GET /dashboard-files (OPTIMAL ARCHITECTURE: unified file list from all three tables)
+            elif method == "GET" and path == "dashboard-files":
+                return await self.get_dashboard_files(user_id, user_context)
             
             # GET /list-parsed-files
             elif method == "GET" and path == "list-parsed-files":
