@@ -38,21 +38,31 @@ class OpenAIAdapter:
         Args:
             api_key: OpenAI API key (takes precedence)
             base_url: OpenAI base URL (for custom endpoints)
-            config_adapter: Optional ConfigAdapter for reading configuration (preferred over os.getenv)
+            config_adapter: ConfigAdapter for reading configuration (REQUIRED if api_key not provided)
+        
+        Raises:
+            ValueError: If neither api_key nor config_adapter is provided
         """
         self.config_adapter = config_adapter
+        self.logger = logging.getLogger("OpenAIAdapter")
         
         # Support both LLM_OPENAI_API_KEY and OPENAI_API_KEY for compatibility
-        # Priority: parameter > ConfigAdapter > environment (with warning)
+        # Priority: parameter > ConfigAdapter (no fallback to os.getenv)
         if api_key:
             self.api_key = api_key
         elif config_adapter:
             self.api_key = config_adapter.get("LLM_OPENAI_API_KEY") or config_adapter.get("OPENAI_API_KEY")
+            if not self.api_key:
+                raise ValueError(
+                    "LLM_OPENAI_API_KEY or OPENAI_API_KEY not found in configuration. "
+                    "Either provide api_key parameter or ensure config contains LLM_OPENAI_API_KEY."
+                )
         else:
-            self.api_key = os.getenv("LLM_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-            if self.api_key:
-                self.logger = logging.getLogger("OpenAIAdapter")
-                self.logger.warning("⚠️ [OPENAI_ADAPTER] Using os.getenv() - consider passing config_adapter for centralized configuration")
+            raise ValueError(
+                "ConfigAdapter is required. "
+                "Pass config_adapter from Public Works Foundation. "
+                "Example: OpenAIAdapter(config_adapter=config_adapter)"
+            )
         
         self.base_url = base_url
         if not hasattr(self, 'logger'):

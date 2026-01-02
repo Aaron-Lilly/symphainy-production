@@ -81,18 +81,18 @@ class SupabaseAdapter:
             logger.debug(f"⚠️ [SUPABASE_ADAPTER] service_client initialized as anon_client (may not be able to query user_tenants table)")
         
         # Initialize JWKS adapter for local JWT verification
-        # Use ConfigAdapter if available (preferred), otherwise fallback to os.getenv()
+        # Use ConfigAdapter (required, no fallback to os.getenv)
         try:
             from .supabase_jwks_adapter import SupabaseJWKSAdapter
             
-            # Get JWKS URL from ConfigAdapter or environment
+            # Get JWKS URL from ConfigAdapter (required)
             if config_adapter:
                 jwks_url = config_adapter.get("SUPABASE_JWKS_URL")
             else:
-                import os
-                jwks_url = os.getenv("SUPABASE_JWKS_URL")
-                if jwks_url:
-                    logger.warning("⚠️ [SUPABASE_ADAPTER] Using os.getenv() - consider passing config_adapter for centralized configuration")
+                raise ValueError(
+                    "ConfigAdapter is required for Supabase adapter. "
+                    "Pass config_adapter from Public Works Foundation."
+                )
             
             if jwks_url:
                 self.jwks_adapter = SupabaseJWKSAdapter(jwks_url=jwks_url, config_adapter=config_adapter)
@@ -101,14 +101,14 @@ class SupabaseAdapter:
                 self.jwks_adapter = SupabaseJWKSAdapter(supabase_url=self.url, config_adapter=config_adapter)
                 logger.info(f"✅ Supabase adapter initialized with URL: {self.url} (JWKS enabled, constructed URL)")
             
-            # Store JWT issuer for validation (from ConfigAdapter or environment)
+            # Store JWT issuer for validation (from ConfigAdapter)
             if config_adapter:
                 self.jwt_issuer = config_adapter.get("SUPABASE_JWT_ISSUER")
             else:
-                import os
-                self.jwt_issuer = os.getenv("SUPABASE_JWT_ISSUER")
-                if self.jwt_issuer:
-                    logger.warning("⚠️ [SUPABASE_ADAPTER] Using os.getenv() - consider passing config_adapter for centralized configuration")
+                raise ValueError(
+                    "ConfigAdapter is required for Supabase adapter. "
+                    "Pass config_adapter from Public Works Foundation."
+                )
             
             if self.jwt_issuer:
                 logger.info(f"✅ JWT issuer configured: {self.jwt_issuer}")
@@ -375,9 +375,9 @@ class SupabaseAdapter:
                 raise ValueError(f"Unsupported key type: {key_type} or algorithm: {algorithm}")
             
             # Verify and decode JWT (PyJWT works with cryptography RSA keys directly)
-            # Validate issuer if configured (from SUPABASE_JWT_ISSUER env var)
+            # Validate issuer if configured (from ConfigAdapter via jwt_issuer attribute)
             verify_options = {"verify_exp": True, "verify_aud": True}
-            issuer = getattr(self, 'jwt_issuer', None) or os.getenv("SUPABASE_JWT_ISSUER")
+            issuer = getattr(self, 'jwt_issuer', None)
             
             # Determine algorithm from key type
             if key_type == "EC" or algorithm == "ES256":

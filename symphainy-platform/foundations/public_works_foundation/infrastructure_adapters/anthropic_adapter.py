@@ -27,23 +27,30 @@ class AnthropicAdapter:
         
         Args:
             api_key: Anthropic API key (takes precedence)
-            config_adapter: Optional ConfigAdapter for reading configuration (preferred over os.getenv)
+            config_adapter: ConfigAdapter for reading configuration (REQUIRED if api_key not provided)
+        
+        Raises:
+            ValueError: If neither api_key nor config_adapter is provided
         """
         self.config_adapter = config_adapter
+        self.logger = logging.getLogger("AnthropicAdapter")
         
-        # Priority: parameter > ConfigAdapter > environment (with warning)
+        # Priority: parameter > ConfigAdapter (no fallback to os.getenv)
         if api_key:
             self.api_key = api_key
         elif config_adapter:
             self.api_key = config_adapter.get("ANTHROPIC_API_KEY")
+            if not self.api_key:
+                raise ValueError(
+                    "ANTHROPIC_API_KEY not found in configuration. "
+                    "Either provide api_key parameter or ensure config contains ANTHROPIC_API_KEY."
+                )
         else:
-            self.api_key = os.getenv("ANTHROPIC_API_KEY")
-            if self.api_key:
-                self.logger = logging.getLogger("AnthropicAdapter")
-                self.logger.warning("⚠️ [ANTHROPIC_ADAPTER] Using os.getenv() - consider passing config_adapter for centralized configuration")
-        
-        if not hasattr(self, 'logger'):
-            self.logger = logging.getLogger("AnthropicAdapter")
+            raise ValueError(
+                "ConfigAdapter is required. "
+                "Pass config_adapter from Public Works Foundation. "
+                "Example: AnthropicAdapter(config_adapter=config_adapter)"
+            )
         
         # Anthropic client (private - use wrapper methods instead)
         self._client = None

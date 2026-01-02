@@ -48,19 +48,23 @@ class SupabaseJWKSAdapter:
             self.supabase_url = supabase_url.rstrip('/') if supabase_url else supabase_url
             self.jwks_url = f"{self.supabase_url}/auth/v1/.well-known/jwks.json"
         else:
-            # Try to get from ConfigAdapter (preferred) or environment
+            # Try to get from ConfigAdapter (required, no fallback to os.getenv)
             if config_adapter:
                 jwks_url_env = config_adapter.get("SUPABASE_JWKS_URL")
-            else:
-                import os
-                jwks_url_env = os.getenv("SUPABASE_JWKS_URL")
                 if jwks_url_env:
-                    logger.warning("⚠️ [SUPABASE_JWKS_ADAPTER] Using os.getenv() - consider passing config_adapter for centralized configuration")
-            if jwks_url_env:
-                # Normalize JWKS URL - ensure it has .well-known (not well-known)
-                self.jwks_url = jwks_url_env.replace("/well-known/", "/.well-known/")
+                    # Normalize JWKS URL - ensure it has .well-known (not well-known)
+                    self.jwks_url = jwks_url_env.replace("/well-known/", "/.well-known/")
+                else:
+                    raise ValueError(
+                        "SUPABASE_JWKS_URL not found in configuration. "
+                        "Either provide jwks_url or supabase_url parameter, or ensure config contains SUPABASE_JWKS_URL."
+                    )
             else:
-                raise ValueError("Either supabase_url, jwks_url, or SUPABASE_JWKS_URL env var must be provided")
+                raise ValueError(
+                    "ConfigAdapter is required. "
+                    "Pass config_adapter from Public Works Foundation. "
+                    "Example: SupabaseJWKSAdapter(config_adapter=config_adapter, supabase_url=url)"
+                )
         
         self.cache_ttl = cache_ttl
         

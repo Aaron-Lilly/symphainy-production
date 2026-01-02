@@ -31,33 +31,45 @@ class HuggingFaceAdapter:
         Args:
             endpoint_url: HuggingFace Inference Endpoint URL (takes precedence)
             api_key: HuggingFace API key/token (takes precedence)
-            config_adapter: Optional ConfigAdapter for reading configuration (preferred over os.getenv)
+            config_adapter: ConfigAdapter for reading configuration (REQUIRED if parameters not provided)
+        
+        Raises:
+            ValueError: If required configuration is missing
         """
         self.config_adapter = config_adapter
         
-        # Get from parameters, ConfigAdapter (preferred), or environment (fallback)
+        # Get from parameters or ConfigAdapter (no fallback to os.getenv)
         if endpoint_url:
             self.endpoint_url = endpoint_url
         elif config_adapter:
             self.endpoint_url = config_adapter.get("HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL")
+            if not self.endpoint_url:
+                raise ValueError(
+                    "HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL not found in configuration. "
+                    "Either provide endpoint_url parameter or ensure config contains HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL."
+                )
         else:
-            self.endpoint_url = os.getenv("HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL")
-            if self.endpoint_url:
-                logger.warning("⚠️ [HUGGINGFACE_ADAPTER] Using os.getenv() - consider passing config_adapter for centralized configuration")
+            raise ValueError(
+                "ConfigAdapter is required. "
+                "Pass config_adapter from Public Works Foundation. "
+                "Example: HuggingFaceAdapter(config_adapter=config_adapter)"
+            )
         
         if api_key:
             self.api_key = api_key
         elif config_adapter:
             self.api_key = config_adapter.get("HUGGINGFACE_EMBEDDINGS_API_KEY") or config_adapter.get("HUGGINGFACE_API_KEY")
+            if not self.api_key:
+                raise ValueError(
+                    "HUGGINGFACE_EMBEDDINGS_API_KEY or HUGGINGFACE_API_KEY not found in configuration. "
+                    "Either provide api_key parameter or ensure config contains HUGGINGFACE_EMBEDDINGS_API_KEY."
+                )
         else:
-            self.api_key = os.getenv("HUGGINGFACE_EMBEDDINGS_API_KEY") or os.getenv("HUGGINGFACE_API_KEY")
-            if self.api_key:
-                logger.warning("⚠️ [HUGGINGFACE_ADAPTER] Using os.getenv() - consider passing config_adapter for centralized configuration")
-        
-        if not self.endpoint_url:
-            raise ValueError("HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL not set")
-        if not self.api_key:
-            raise ValueError("HUGGINGFACE_API_KEY not set")
+            raise ValueError(
+                "ConfigAdapter is required. "
+                "Pass config_adapter from Public Works Foundation. "
+                "Example: HuggingFaceAdapter(config_adapter=config_adapter)"
+            )
         
         logger.info(f"✅ HuggingFace adapter initialized for endpoint: {self.endpoint_url[:50]}...")
     
