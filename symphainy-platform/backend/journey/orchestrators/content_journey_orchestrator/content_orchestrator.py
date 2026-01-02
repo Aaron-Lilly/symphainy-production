@@ -1393,17 +1393,10 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             # Pre-check: Verify required dependencies are available before initializing EmbeddingService
             self.logger.info("🔧 Checking EmbeddingService dependencies...")
             
-            # Get ConfigAdapter from PublicWorksFoundationService (preferred) or fallback to os.getenv()
+            # Get ConfigAdapter from PublicWorksFoundationService (required)
             config_adapter = self._get_config_adapter()
-            if config_adapter:
-                hf_endpoint = config_adapter.get("HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL")
-                hf_api_key = config_adapter.get("HUGGINGFACE_EMBEDDINGS_API_KEY") or config_adapter.get("HUGGINGFACE_API_KEY")
-            else:
-                import os
-                hf_endpoint = os.getenv("HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL")
-                hf_api_key = os.getenv("HUGGINGFACE_EMBEDDINGS_API_KEY") or os.getenv("HUGGINGFACE_API_KEY")
-                if hf_endpoint or hf_api_key:
-                    self.logger.warning("⚠️ [CONTENT_ORCHESTRATOR] Using os.getenv() - consider accessing ConfigAdapter via PublicWorksFoundationService")
+            hf_endpoint = config_adapter.get("HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL")
+            hf_api_key = config_adapter.get("HUGGINGFACE_EMBEDDINGS_API_KEY") or config_adapter.get("HUGGINGFACE_API_KEY")
             
             if not hf_endpoint or not hf_api_key:
                 self.logger.error("❌ HuggingFace configuration missing - HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL and HUGGINGFACE_EMBEDDINGS_API_KEY required")
@@ -1962,10 +1955,12 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             except Exception as e:
                 self.logger.warning(f"⚠️ Failed to get Saga policy from PolicyConfigurationService: {e}")
         
-        # Fallback to environment variables if service not available
-        import os
-        saga_enabled = os.getenv("SAGA_ENABLED", "false").lower() == "true"
-        saga_operations = os.getenv("SAGA_OPERATIONS", "content_process_file").split(",")
+        # Fallback to ConfigAdapter if PolicyConfigurationService not available
+        config_adapter = self._get_config_adapter()
+        saga_enabled_str = config_adapter.get("SAGA_ENABLED", "false")
+        saga_enabled = saga_enabled_str.lower() == "true" if isinstance(saga_enabled_str, str) else bool(saga_enabled_str)
+        saga_operations_str = config_adapter.get("SAGA_OPERATIONS", "content_process_file")
+        saga_operations = saga_operations_str.split(",") if isinstance(saga_operations_str, str) else []
         
         return {
             "enable_saga": saga_enabled,

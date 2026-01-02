@@ -40,14 +40,9 @@ class PolicyConfigurationService(RealmServiceBase):
         self._wal_policy_cache: Dict[str, Dict[str, Any]] = {}
         self._saga_policy_cache: Dict[str, Dict[str, Any]] = {}
         
-        # Configuration file path (optional) - get from ConfigAdapter if available
+        # Configuration file path (optional) - get from ConfigAdapter (required)
         config_adapter = self._get_config_adapter()
-        if config_adapter:
-            self._config_file_path = config_adapter.get("POLICY_CONFIG_FILE")
-        else:
-            self._config_file_path = os.getenv("POLICY_CONFIG_FILE", None)
-            if self._config_file_path:
-                self.logger.warning("⚠️ [POLICY_CONFIG] Using os.getenv() - consider accessing ConfigAdapter via PublicWorksFoundationService")
+        self._config_file_path = config_adapter.get("POLICY_CONFIG_FILE")
     
     async def initialize(self) -> bool:
         """
@@ -257,16 +252,10 @@ class PolicyConfigurationService(RealmServiceBase):
         """Build WAL policy from ConfigAdapter (preferred) or environment variables."""
         config_adapter = self._get_config_adapter()
         
-        # Helper to get config value
+        # Helper to get config value from ConfigAdapter (required)
         def get_config_value(key: str, default: str = "") -> str:
-            if config_adapter:
-                value = config_adapter.get(key, default)
-                return str(value) if value else default
-            else:
-                value = os.getenv(key, default)
-                if value != default:
-                    self.logger.warning(f"⚠️ [POLICY_CONFIG] Using os.getenv() for {key} - consider accessing ConfigAdapter")
-                return value
+            value = config_adapter.get(key, default)
+            return str(value) if value else default
         
         # Check global WAL enablement
         wal_enabled_str = get_config_value("WAL_ENABLED", "false")
@@ -385,16 +374,10 @@ class PolicyConfigurationService(RealmServiceBase):
         """Build Saga policy from ConfigAdapter (preferred) or environment variables."""
         config_adapter = self._get_config_adapter()
         
-        # Helper to get config value
+        # Helper to get config value from ConfigAdapter (required)
         def get_config_value(key: str, default: str = "") -> str:
-            if config_adapter:
-                value = config_adapter.get(key, default)
-                return str(value) if value else default
-            else:
-                value = os.getenv(key, default)
-                if value != default:
-                    self.logger.warning(f"⚠️ [POLICY_CONFIG] Using os.getenv() for {key} - consider accessing ConfigAdapter")
-                return value
+            value = config_adapter.get(key, default)
+            return str(value) if value else default
         
         # Check global Saga enablement
         saga_enabled_str = get_config_value("SAGA_ENABLED", "false")
@@ -573,6 +556,7 @@ class PolicyConfigurationService(RealmServiceBase):
                 "success": False,
                 "error": str(e)
             }
+
 
 
 

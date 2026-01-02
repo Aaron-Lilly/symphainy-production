@@ -1130,10 +1130,12 @@ class InsightsJourneyOrchestrator(OrchestratorBase):
             except Exception as e:
                 self.logger.warning(f"⚠️ Failed to get Saga policy from PolicyConfigurationService: {e}")
         
-        # Fallback to environment variables if service not available
-        import os
-        saga_enabled = os.getenv("SAGA_ENABLED", "false").lower() == "true"
-        saga_operations = os.getenv("SAGA_OPERATIONS", "insights_data_mapping").split(",")
+        # Fallback to ConfigAdapter if PolicyConfigurationService not available
+        config_adapter = self._get_config_adapter()
+        saga_enabled_str = config_adapter.get("SAGA_ENABLED", "false")
+        saga_enabled = saga_enabled_str.lower() == "true" if isinstance(saga_enabled_str, str) else bool(saga_enabled_str)
+        saga_operations_str = config_adapter.get("SAGA_OPERATIONS", "insights_data_mapping")
+        saga_operations = saga_operations_str.split(",") if isinstance(saga_operations_str, str) else []
         
         return {
             "enable_saga": saga_enabled,

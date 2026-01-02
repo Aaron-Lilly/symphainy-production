@@ -55,24 +55,23 @@ class Initialization:
                     # Try to create directly using ConfigAdapter (preferred) or environment
                     from foundations.public_works_foundation.infrastructure_adapters.huggingface_adapter import HuggingFaceAdapter
                     
-                    # Get ConfigAdapter from PublicWorksFoundationService if available
-                    config_adapter = None
-                    try:
-                        if self.service.di_container and hasattr(self.service.di_container, 'get_foundation_service'):
-                            public_works = self.service.di_container.get_foundation_service("PublicWorksFoundationService")
-                            if public_works and hasattr(public_works, 'config_adapter'):
-                                config_adapter = public_works.config_adapter
-                    except Exception:
-                        pass
+                    # Get ConfigAdapter from PublicWorksFoundationService (required)
+                    if not self.service.di_container:
+                        raise ValueError("DI Container not available - cannot get ConfigAdapter")
                     
-                    if config_adapter:
-                        endpoint_url = config_adapter.get("HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL")
-                        api_key = config_adapter.get("HUGGINGFACE_EMBEDDINGS_API_KEY") or config_adapter.get("HUGGINGFACE_API_KEY")
-                    else:
-                        endpoint_url = os.getenv("HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL")
-                        api_key = os.getenv("HUGGINGFACE_EMBEDDINGS_API_KEY") or os.getenv("HUGGINGFACE_API_KEY")
-                        if endpoint_url or api_key:
-                            self.logger.warning("⚠️ [EMBEDDING_SERVICE] Using os.getenv() - consider accessing ConfigAdapter via PublicWorksFoundationService")
+                    if not hasattr(self.service.di_container, 'get_foundation_service'):
+                        raise ValueError("DI Container does not have get_foundation_service method")
+                    
+                    public_works = self.service.di_container.get_foundation_service("PublicWorksFoundationService")
+                    if not public_works:
+                        raise ValueError("Public Works Foundation Service not available - cannot get ConfigAdapter")
+                    
+                    if not hasattr(public_works, 'config_adapter') or not public_works.config_adapter:
+                        raise ValueError("ConfigAdapter not available in Public Works Foundation")
+                    
+                    config_adapter = public_works.config_adapter
+                    endpoint_url = config_adapter.get("HUGGINGFACE_EMBEDDINGS_ENDPOINT_URL")
+                    api_key = config_adapter.get("HUGGINGFACE_EMBEDDINGS_API_KEY") or config_adapter.get("HUGGINGFACE_API_KEY")
                     
                     if endpoint_url and api_key:
                         self.service.hf_adapter = HuggingFaceAdapter(

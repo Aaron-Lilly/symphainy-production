@@ -108,3 +108,4 @@ echo -e "   ArangoDB: ${ARANGO_URL:-http://${ARANGO_HOST:-arangodb}:${ARANGO_POR
 
 
 
+

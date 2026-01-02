@@ -430,21 +430,14 @@ class DataSolutionOrchestratorService(OrchestratorBase):
         - Default: disabled (no overhead)
         """
         # Policy-based WAL enablement
-        # Check ConfigAdapter (preferred) or environment variable
+        # Get from ConfigAdapter (required)
         config_adapter = self._get_config_adapter()
-        if config_adapter:
-            wal_enabled = config_adapter.get("WAL_ENABLED", "false")
-            if isinstance(wal_enabled, str):
-                wal_enabled = wal_enabled.lower() == "true"
-            else:
-                wal_enabled = bool(wal_enabled)
-            wal_operations_str = config_adapter.get("WAL_OPERATIONS", "data_ingest,data_parse,data_embed,data_expose,data_mash")
+        wal_enabled = config_adapter.get("WAL_ENABLED", "false")
+        if isinstance(wal_enabled, str):
+            wal_enabled = wal_enabled.lower() == "true"
         else:
-            import os
-            wal_enabled = os.getenv("WAL_ENABLED", "false").lower() == "true"
-            wal_operations_str = os.getenv("WAL_OPERATIONS", "data_ingest,data_parse,data_embed,data_expose,data_mash")
-            if wal_enabled or wal_operations_str:
-                self.logger.warning("⚠️ [DATA_SOLUTION] Using os.getenv() - consider accessing ConfigAdapter via PublicWorksFoundationService")
+            wal_enabled = bool(wal_enabled)
+        wal_operations_str = config_adapter.get("WAL_OPERATIONS", "data_ingest,data_parse,data_embed,data_expose,data_mash")
         
         # Parse wal operations
         if isinstance(wal_operations_str, str):
@@ -566,21 +559,14 @@ class DataSolutionOrchestratorService(OrchestratorBase):
             except Exception as e:
                 self.logger.warning(f"⚠️ Failed to get Saga policy from PolicyConfigurationService: {e}")
         
-        # Fallback to ConfigAdapter (preferred) or environment variables if service not available
+        # Fallback to ConfigAdapter if PolicyConfigurationService not available
         config_adapter = self._get_config_adapter()
-        if config_adapter:
-            saga_enabled = config_adapter.get("SAGA_ENABLED", "false")
-            if isinstance(saga_enabled, str):
-                saga_enabled = saga_enabled.lower() == "true"
-            else:
-                saga_enabled = bool(saga_enabled)
-            saga_operations_str = config_adapter.get("SAGA_OPERATIONS", "data_ingest_pipeline,data_mapping")
+        saga_enabled = config_adapter.get("SAGA_ENABLED", "false")
+        if isinstance(saga_enabled, str):
+            saga_enabled = saga_enabled.lower() == "true"
         else:
-            import os
-            saga_enabled = os.getenv("SAGA_ENABLED", "false").lower() == "true"
-            saga_operations_str = os.getenv("SAGA_OPERATIONS", "data_ingest_pipeline,data_mapping")
-            if saga_enabled or saga_operations_str:
-                self.logger.warning("⚠️ [DATA_SOLUTION] Using os.getenv() - consider accessing ConfigAdapter via PublicWorksFoundationService")
+            saga_enabled = bool(saga_enabled)
+        saga_operations_str = config_adapter.get("SAGA_OPERATIONS", "data_ingest_pipeline,data_mapping")
         
         # Parse saga operations
         if isinstance(saga_operations_str, str):

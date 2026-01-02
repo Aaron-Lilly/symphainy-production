@@ -119,3 +119,4 @@ We need a script to:
 - [ ] Delete original file → should cascade delete parsed files and embeddings
 - [ ] Embedding creation should work (no "no content" error)
 
+

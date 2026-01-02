@@ -235,3 +235,4 @@ pytest tests/e2e/insights/test_insights_architectural_e2e.py -v
 
 
 
+

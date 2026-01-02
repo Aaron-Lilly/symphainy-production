@@ -181,23 +181,54 @@ class OrchestratorBase(ABC):
         """Delegate to RealmServiceBase for document storage."""
         return await self._realm_service.store_document(document_data, metadata)
     
-    def _get_config_adapter(self) -> Optional[Any]:
+    def _get_config_adapter(self) -> Any:
         """
         Get ConfigAdapter from PublicWorksFoundationService.
         
         Returns:
-            ConfigAdapter instance if available, None otherwise
+            ConfigAdapter instance (required - raises error if not available)
+        
+        Raises:
+            ValueError: If ConfigAdapter is not available (Public Works Foundation not initialized)
         """
         try:
-            # Try to get PublicWorksFoundationService from DI Container
-            if self.di_container and hasattr(self.di_container, 'get_foundation_service'):
-                public_works = self.di_container.get_foundation_service("PublicWorksFoundationService")
-                if public_works and hasattr(public_works, 'config_adapter'):
-                    return public_works.config_adapter
+            # Get PublicWorksFoundationService from DI Container
+            if not self.di_container:
+                raise ValueError(
+                    "DI Container not available. "
+                    "ConfigAdapter requires Public Works Foundation to be initialized."
+                )
+            
+            if not hasattr(self.di_container, 'get_foundation_service'):
+                raise ValueError(
+                    "DI Container does not have get_foundation_service method. "
+                    "ConfigAdapter requires Public Works Foundation to be initialized."
+                )
+            
+            public_works = self.di_container.get_foundation_service("PublicWorksFoundationService")
+            if not public_works:
+                raise ValueError(
+                    "Public Works Foundation Service not available. "
+                    "Ensure Public Works Foundation is initialized before using ConfigAdapter."
+                )
+            
+            if not hasattr(public_works, 'config_adapter') or not public_works.config_adapter:
+                raise ValueError(
+                    "ConfigAdapter not available in Public Works Foundation. "
+                    "Ensure Public Works Foundation is fully initialized."
+                )
+            
+            return public_works.config_adapter
+            
+        except ValueError:
+            # Re-raise ValueError (our own errors)
+            raise
         except Exception as e:
-            # Silently fail - fallback to os.getenv() will be used
-            pass
-        return None
+            # Wrap other exceptions
+            raise ValueError(
+                f"Failed to get ConfigAdapter from Public Works Foundation: {e}. "
+                "Ensure Public Works Foundation is initialized before using ConfigAdapter."
+            ) from e
     
     async def track_data_lineage(
         self,

@@ -631,10 +631,15 @@ Return your analysis as structured reasoning that can be parsed into a POC propo
             LLMModel enum value (defaults to GPT_4O_MINI)
         """
         from foundations.public_works_foundation.abstraction_contracts.llm_protocol import LLMModel
-        import os
         
-        # Try to get from environment variable
-        model_name = os.getenv("BUSINESS_OUTCOMES_AGENT_LLM_MODEL", "gpt-4o-mini")
+        # Get from ConfigAdapter (required)
+        if not self.public_works_foundation or not hasattr(self.public_works_foundation, 'config_adapter'):
+            # Fallback to default if ConfigAdapter not available (should not happen in production)
+            self.logger.warning("⚠️ ConfigAdapter not available, using default model")
+            model_name = "gpt-4o-mini"
+        else:
+            config_adapter = self.public_works_foundation.config_adapter
+            model_name = config_adapter.get("BUSINESS_OUTCOMES_AGENT_LLM_MODEL", "gpt-4o-mini")
         
         # Map to LLMModel enum
         model_map = {
