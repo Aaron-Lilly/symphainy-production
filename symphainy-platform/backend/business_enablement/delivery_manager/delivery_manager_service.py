@@ -130,14 +130,46 @@ class DeliveryManagerService(ManagerServiceBase, ManagerServiceProtocol):
             # Data Solution Orchestrator is now in Solution realm and discovered via Curator
             # No initialization needed here - ContentAnalysisOrchestrator discovers it via Curator
             
-            # Initialize SOA API exposure
-            await self.soa_mcp_module.initialize_soa_api_exposure()
+            # Initialize SOA API exposure (unified pattern - Phase 3.2.5)
+            # SOA APIs are now defined via _define_soa_api_handlers() and exposed via MCP Server
+            # Old SoaMcp module pattern is deprecated - using unified pattern instead
             
-            # Initialize MCP tool integration
-            await self.soa_mcp_module.initialize_mcp_tool_integration()
+            # Initialize MCP Server (unified pattern)
+            await self._initialize_mcp_server()
             
             # Register with Curator (Phase 2 pattern)
-            await self.soa_mcp_module.register_delivery_manager_capabilities()
+            # NOTE: SOA APIs and MCP tools are now sourced from MCP Server (single source of truth)
+            soa_apis_from_mcp = await self.get_soa_apis() if hasattr(self, 'mcp_server') and self.mcp_server else {}
+            soa_api_names = list(soa_apis_from_mcp.keys())
+            mcp_tool_names = [f"business_enablement_{name}" for name in soa_api_names]
+            
+            if soa_api_names:
+                await self.register_with_curator(
+                    capabilities=[
+                        {
+                            "name": "capability_delivery",
+                            "protocol": "DeliveryManagerProtocol",
+                            "description": "Deliver business capabilities via business enablement pillars",
+                            "contracts": {
+                                "soa_api": {
+                                    "api_name": "deliver_capability",
+                                    "endpoint": "/api/delivery-manager/capability",
+                                    "method": "POST",
+                                    "handler": self.deliver_capability
+                                },
+                                "mcp_tool": {
+                                    "tool_name": "business_enablement_deliver_capability",
+                                    "tool_definition": {
+                                        "name": "business_enablement_deliver_capability",
+                                        "description": "Deliver a business capability via business enablement pillars"
+                                    }
+                                }
+                            }
+                        }
+                    ],
+                    soa_apis=soa_api_names,
+                    mcp_tools=mcp_tool_names
+                )
             
             self.is_initialized = True
             
