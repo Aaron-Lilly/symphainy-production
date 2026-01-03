@@ -36,16 +36,21 @@ class CloudReadyConfig:
         Initialize cloud-ready configuration.
         
         Args:
-            config_adapter: ConfigAdapter for reading configuration (required)
+            config_adapter: ConfigAdapter for reading configuration (optional - uses os.getenv if not provided)
         
-        Raises:
-            ValueError: If config_adapter is not provided
+        Note:
+            If config_adapter is not provided, uses os.getenv as fallback.
+            This allows initialization before Public Works Foundation is available.
         """
         if not config_adapter:
-            raise ValueError(
-                "ConfigAdapter is required for CloudReadyConfig. "
-                "Pass config_adapter from Public Works Foundation."
-            )
+            # Create a minimal config adapter that uses os.getenv
+            # This allows CloudReadyConfig to be initialized before Public Works Foundation
+            class _MinimalConfigAdapter:
+                def get(self, key: str, default: Any = None) -> Any:
+                    import os
+                    return os.getenv(key, default)
+            
+            config_adapter = _MinimalConfigAdapter()
         
         self.config_adapter = config_adapter
         
@@ -182,17 +187,29 @@ def get_cloud_ready_config(config_adapter=None) -> CloudReadyConfig:
     Get the global cloud-ready configuration instance.
     
     Args:
-        config_adapter: ConfigAdapter for reading configuration (required)
+        config_adapter: ConfigAdapter for reading configuration (optional - defaults to disabled mode if not provided)
     
     Returns:
         CloudReadyConfig instance (singleton).
     
-    Raises:
-        ValueError: If config_adapter is not provided
+    Note:
+        If config_adapter is not provided, returns a CloudReadyConfig with disabled mode.
+        This allows the function to be called before Public Works Foundation is initialized.
     """
     global _cloud_ready_config_instance
     if _cloud_ready_config_instance is None:
-        _cloud_ready_config_instance = CloudReadyConfig(config_adapter=config_adapter)
+        if config_adapter is None:
+            # Create a minimal config adapter that returns defaults
+            # This allows CloudReadyConfig to be initialized before Public Works Foundation
+            class _MinimalConfigAdapter:
+                def get(self, key: str, default: Any = None) -> Any:
+                    import os
+                    return os.getenv(key, default)
+            
+            minimal_adapter = _MinimalConfigAdapter()
+            _cloud_ready_config_instance = CloudReadyConfig(config_adapter=minimal_adapter)
+        else:
+            _cloud_ready_config_instance = CloudReadyConfig(config_adapter=config_adapter)
     return _cloud_ready_config_instance
 
 

@@ -551,11 +551,11 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://35.215.64.103}
       - API_CORS_ORIGINS=${API_CORS_ORIGINS:-http://localhost,http://35.215.64.103}
       # Database Configuration
-      - ARANGO_URL=${ARANGO_URL:-http://${ARANGO_HOST:-arangodb}:${ARANGO_PORT:-8529}}
+      - ARANGO_URL=${ARANGO_URL:-http://symphainy-arangodb:8529}
       - ARANGO_DB=${ARANGO_DB:-symphainy_metadata}
       - ARANGO_USER=${ARANGO_USER:-root}
       - ARANGO_PASS=${ARANGO_PASS:-}
-      - REDIS_URL=${REDIS_URL:-redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}}
+      - REDIS_URL=${REDIS_URL:-redis://symphainy-redis:6379}
       # Consul Configuration
       - CONSUL_HOST=${CONSUL_HOST:-consul}
       - CONSUL_PORT=${CONSUL_PORT:-8500}

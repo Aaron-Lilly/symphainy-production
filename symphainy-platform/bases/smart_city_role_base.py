@@ -177,40 +177,33 @@ class SmartCityRoleBase(SmartCityRoleProtocol, UtilityAccessMixin, Infrastructur
         """
         Get all exposed SOA APIs.
         
-        Smart City services can expose SOA APIs in two ways:
-        1. **SoaMcp Module Pattern (Recommended):** The `SoaMcp` micro-module sets `self.soa_apis`
-           during `initialize_soa_api_exposure()`. This method automatically returns it.
-        2. **Override Pattern:** Services can override this method to return custom SOA API definitions.
+        UNIFIED PATTERN (Phase 3.2.5): Returns SOA APIs from MCP Server registration.
+        Smart City services should:
+        1. Define SOA APIs via _define_soa_api_handlers() (or SoaMcp module)
+        2. Initialize MCP Server during initialize()
+        3. MCP Server automatically registers tools from SOA APIs
+        4. This method returns what MCP Server has registered (single source of truth)
         
         Returns:
-            Dict containing SOA API definitions. Format:
-            {
-                "api_name": {
-                    "endpoint": "/api/service/endpoint",
-                    "method": "POST",
-                    "description": "API description",
-                    "parameters": ["param1", "param2"]
-                },
-                ...
-            }
-        
-        Note:
-            If neither pattern is used, returns a placeholder dict. Services should use one of the patterns
-            to properly expose their SOA APIs for realm consumption.
+            Dict containing SOA API definitions from MCP Server, or empty dict if not initialized
         """
-        # Check if SoaMcp module has set self.soa_apis
+        # Use unified pattern from RealmServiceBase
+        # Query MCP Server for registered tools (single source of truth)
+        if hasattr(self, 'mcp_server') and self.mcp_server:
+            if hasattr(self.mcp_server, 'get_soa_apis_from_tools'):
+                return await self.mcp_server.get_soa_apis_from_tools()
+        
+        # MCP Server not initialized - return empty dict (service not ready)
+        # Legacy: If service has self.soa_apis set by SoaMcp module, return it for backward compatibility
         if hasattr(self, 'soa_apis') and isinstance(self.soa_apis, dict) and len(self.soa_apis) > 0:
+            self.logger.warning(
+                f"⚠️ {self.service_name} using legacy SoaMcp module pattern. "
+                f"Migrate to unified MCP Server pattern (Phase 3.2.5)."
+            )
             return self.soa_apis
         
-        # If service overrides this method, it will be called instead
-        # Otherwise, log a warning and return placeholder
-        if self.logger:
-            self.logger.warning(
-                f"⚠️ {self.service_name} has not exposed SOA APIs. "
-                f"Either use SoaMcp module pattern (sets self.soa_apis) or override get_soa_apis() method."
-            )
-        
-        return {"status": "soa_apis_placeholder", "message": "Service has not exposed SOA APIs"}
+        # No SOA APIs defined
+        return {}
     
     async def orchestrate_foundation_capabilities(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Orchestrate foundational capabilities into platform services."""

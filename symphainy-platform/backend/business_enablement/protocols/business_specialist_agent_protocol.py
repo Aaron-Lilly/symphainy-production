@@ -410,3 +410,87 @@ class BusinessSpecialistAgentBase(AgentBase):
             "initialized": self.is_initialized,
             "timestamp": datetime.utcnow().isoformat()
         }
+    
+    # ============================================================================
+    # UNIFIED MCP TOOL ACCESS (Phase 3.2.5)
+    # ============================================================================
+    
+    async def execute_mcp_tool(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute MCP tool via orchestrator's MCP server.
+        
+        This is the PRIMARY method for agents to interact with services.
+        Agents should NEVER access services directly.
+        
+        Architecture (Phase 3.2.5):
+        - Agents use MCP Tools exclusively (never direct service access)
+        - MCP Tools are exposed by MCP Servers (one per realm)
+        - MCP Servers wrap SOA APIs as MCP Tools
+        - Orchestrators initialize MCP Servers and set themselves on agents
+        
+        Args:
+            tool_name: Name of MCP tool to execute (e.g., "content_upload_file")
+            parameters: Tool parameters (dict)
+            user_context: Optional user context dict with user_id, tenant_id, permissions, etc.
+        
+        Returns:
+            Tool execution result (dict)
+        
+        Raises:
+            ValueError: If orchestrator or MCP server not available
+        
+        Example:
+            ```python
+            result = await self.execute_mcp_tool(
+                "content_upload_file",
+                {
+                    "file_data": file_data,
+                    "filename": filename,
+                    "file_type": file_type
+                },
+                user_context=user_context
+            )
+            ```
+        """
+        # Get orchestrator (set by orchestrator during initialization)
+        orchestrator = getattr(self, 'orchestrator', None)
+        if not orchestrator:
+            raise ValueError(
+                f"Orchestrator not set for {self.agent_name}. "
+                f"Cannot execute MCP tool '{tool_name}'. "
+                f"Ensure orchestrator calls set_orchestrator(agent) during initialization."
+            )
+        
+        # Get MCP server from orchestrator
+        if not hasattr(orchestrator, 'mcp_server') or orchestrator.mcp_server is None:
+            raise ValueError(
+                f"Orchestrator {orchestrator.__class__.__name__} does not have MCP server. "
+                f"Cannot execute MCP tool '{tool_name}'. "
+                f"Ensure orchestrator initializes MCP server in _initialize_mcp_server()."
+            )
+        
+        # Use provided user_context or default from agent
+        final_user_context = user_context or getattr(self, 'user_context', None)
+        
+        # Execute tool via MCP server
+        return await orchestrator.mcp_server.execute_tool(
+            tool_name,
+            parameters,
+            user_context=final_user_context
+        )
+    
+    def set_orchestrator(self, orchestrator: Any):
+        """
+        Set orchestrator reference (called by orchestrator during initialization).
+        
+        This allows agents to access the orchestrator's MCP server for tool execution.
+        
+        Args:
+            orchestrator: Orchestrator instance that owns this agent
+        """
+        self.orchestrator = orchestrator

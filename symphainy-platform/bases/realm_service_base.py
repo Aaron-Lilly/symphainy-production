@@ -892,3 +892,54 @@ class RealmServiceBase(
         Returns:
             Response from destination service
         """
+    
+    # ============================================================================
+    # UNIFIED SOA API → MCP TOOL PATTERN (Phase 3.2.5)
+    # ============================================================================
+    
+    def _define_soa_api_handlers(self) -> Dict[str, Any]:
+        """
+        Define SOA API handlers (internal method).
+        
+        Services override this to define their SOA APIs.
+        This is called by MCP Server during initialization.
+        
+        Returns:
+            Dict of SOA API definitions:
+            {
+                "api_name": {
+                    "handler": method_reference,
+                    "input_schema": {...},
+                    "description": "..."
+                }
+            }
+        
+        Note:
+            This is the UNIFIED pattern. Services should define SOA APIs here,
+            and MCP Servers will automatically expose them as MCP Tools.
+        """
+        return {}
+    
+    async def get_soa_apis(self) -> Dict[str, Any]:
+        """
+        Get SOA APIs exposed by this service.
+        
+        UNIFIED PATTERN: Returns SOA APIs from MCP Server registration.
+        If MCP Server not initialized, returns empty dict (service not ready).
+        
+        Architecture:
+        1. Service defines SOA APIs via _define_soa_api_handlers()
+        2. MCP Server registers tools from _define_soa_api_handlers() during initialization
+        3. This method returns what MCP Server has registered (single source of truth)
+        
+        Returns:
+            Dict of SOA API definitions from MCP Server, or empty dict if MCP Server not initialized
+        """
+        # Query MCP Server for registered tools (single source of truth)
+        if hasattr(self, 'mcp_server') and self.mcp_server:
+            if hasattr(self.mcp_server, 'get_soa_apis_from_tools'):
+                return await self.mcp_server.get_soa_apis_from_tools()
+        
+        # MCP Server not initialized or doesn't support unified pattern
+        # Return empty dict (service not ready to expose SOA APIs)
+        return {}

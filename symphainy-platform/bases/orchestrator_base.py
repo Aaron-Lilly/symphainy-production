@@ -109,8 +109,9 @@ class OrchestratorBase(ABC):
         1. Call super().initialize()
         2. Initialize composed realm service
         3. Get Smart City services (via delegation)
-        4. Initialize agents
-        5. Register with Curator
+        4. Initialize MCP server (if orchestrator defines SOA APIs)
+        5. Initialize agents
+        6. Register with Curator
         
         Returns:
             True if initialization successful, False otherwise
@@ -123,6 +124,18 @@ class OrchestratorBase(ABC):
             if not realm_init_result:
                 self.logger.warning("⚠️ Realm service initialization failed, continuing anyway...")
             
+            # Initialize MCP server if orchestrator defines SOA APIs (Phase 3.2.5)
+            if hasattr(self, '_define_soa_api_handlers'):
+                try:
+                    await self._initialize_mcp_server()
+                except Exception as e:
+                    self.logger.warning(f"⚠️ MCP server initialization failed: {e}, continuing anyway...")
+            
+            # Set orchestrator on agents (for MCP tool access)
+            for agent in self._agents.values():
+                if hasattr(agent, 'set_orchestrator'):
+                    agent.set_orchestrator(self)
+            
             self.is_initialized = True
             self.orchestrator_health = "healthy"
             
@@ -133,6 +146,30 @@ class OrchestratorBase(ABC):
             self.logger.error(f"❌ Failed to initialize {self.orchestrator_name}: {e}")
             self.orchestrator_health = "unhealthy"
             return False
+    
+    async def _initialize_mcp_server(self):
+        """
+        Initialize MCP server for this orchestrator.
+        
+        Subclasses should override this to create realm-specific MCP server.
+        MCP server will automatically register tools from _define_soa_api_handlers().
+        
+        Example:
+            ```python
+            async def _initialize_mcp_server(self):
+                from backend.content.mcp_server.content_mcp_server import ContentMCPServer
+                self.mcp_server = ContentMCPServer(
+                    orchestrator=self,
+                    di_container=self.di_container
+                )
+                await self.mcp_server.initialize()
+            ```
+        """
+        # Default implementation - subclasses should override
+        self.logger.warning(
+            f"⚠️ {self.orchestrator_name} defines SOA APIs but doesn't initialize MCP server. "
+            f"Override _initialize_mcp_server() to create realm-specific MCP server."
+        )
     
     # ========================================================================
     # DELEGATION TO REALM SERVICE (Smart City Access)
