@@ -195,6 +195,33 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     "required": ["file_id", "user_id"]
                 },
                 "description": "Get file details including metadata"
+            },
+            "analyze_document": {
+                "handler": self.analyze_document,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "document_id": {
+                            "type": "string",
+                            "description": "ID of document to analyze"
+                        },
+                        "analysis_types": {
+                            "type": "array",
+                            "description": "Types of analysis to perform",
+                            "items": {
+                                "type": "string",
+                                "enum": ["structure", "metadata", "entities"]
+                            },
+                            "default": ["structure", "metadata", "entities"]
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context for security and tenant validation"
+                        }
+                    },
+                    "required": ["document_id"]
+                },
+                "description": "Analyze document (structure, metadata, entities)"
             }
         }
     

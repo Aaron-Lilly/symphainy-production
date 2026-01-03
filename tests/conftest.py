@@ -41,19 +41,17 @@ def pytest_configure(config):
         sys.path.insert(0, str(_platform_dir))
 
 # Import test configuration
-# Handle import path - pytest.ini should set pythonpath, but ensure it works
-import sys
-from pathlib import Path
-_test_dir = Path(__file__).parent.resolve()
-_test_dir_str = str(_test_dir)
+# Ensure tests directory is in path for config imports
+_test_dir_str = str(_tests_dir)
 if _test_dir_str not in sys.path:
     sys.path.insert(0, _test_dir_str)
+
 try:
     from config.test_config import TestConfig
 except ImportError:
     # Fallback: use direct file import
     import importlib.util
-    _config_file = _test_dir / "config" / "test_config.py"
+    _config_file = _tests_dir / "config" / "test_config.py"
     if _config_file.exists():
         spec = importlib.util.spec_from_file_location("config.test_config", _config_file)
         test_config_module = importlib.util.module_from_spec(spec)
@@ -61,7 +59,7 @@ except ImportError:
         spec.loader.exec_module(test_config_module)
         TestConfig = test_config_module.TestConfig
     else:
-        raise ImportError(f"Could not find config/test_config.py in {_test_dir}")
+        raise ImportError(f"Could not find config/test_config.py in {_tests_dir}")
 
 # Path is configured in pytest.ini - no manipulation needed
 project_root = Path(__file__).parent.parent / "symphainy-platform"

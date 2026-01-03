@@ -724,7 +724,7 @@ class ContentProcessingAgent(BusinessSpecialistAgentBase):
             # Use MCP tool via execute_mcp_tool() helper (unified pattern)
             try:
                 analysis = await self.execute_mcp_tool(
-                    "content_analyze_document",  # Use unified tool name from MCP Server
+                    "content_analyze_document",  # Tool name: content_{api_name} = content_analyze_document
                     {
                         "document_id": file_id,
                         "analysis_types": ["metadata", "entities"]
@@ -773,7 +773,7 @@ class ContentProcessingAgent(BusinessSpecialistAgentBase):
             # Use MCP tool via execute_mcp_tool() helper (unified pattern)
             try:
                 analysis = await self.execute_mcp_tool(
-                    "content_analyze_document",  # Use unified tool name from MCP Server
+                    "content_analyze_document",  # Tool name: content_{api_name} = content_analyze_document
                     {
                         "document_id": file_id,
                         "analysis_types": ["structure", "entities", "semantic"]
@@ -823,7 +823,7 @@ class ContentProcessingAgent(BusinessSpecialistAgentBase):
             try:
                 # Analyze content structure
                 analysis = await self.execute_mcp_tool(
-                    "content_analyze_document",  # Use unified tool name from MCP Server
+                    "content_analyze_document",  # Tool name: content_{api_name} = content_analyze_document
                     {
                         "document_id": file_id,
                         "analysis_types": ["structure"]
