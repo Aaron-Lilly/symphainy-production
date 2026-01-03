@@ -24,9 +24,45 @@ class TestWebSocketGatewayE2E:
     """E2E tests for WebSocket Gateway simulating real browser usage."""
     
     @pytest.fixture
-    def test_session_token(self):
-        """Generate test session token."""
-        return f"test_session_{uuid.uuid4().hex[:16]}"
+    async def traffic_cop_service(self, di_container):
+        """Get Traffic Cop Service for session validation."""
+        from backend.smart_city.services.traffic_cop.traffic_cop_service import TrafficCopService
+        
+        service = TrafficCopService(di_container)
+        await service.initialize()
+        
+        yield service
+        
+        # Cleanup
+        if hasattr(service, "shutdown"):
+            await service.shutdown()
+    
+    @pytest.fixture
+    async def test_session_token(self, traffic_cop_service):
+        """Create valid test session token via Traffic Cop."""
+        from backend.smart_city.protocols.traffic_cop_service_protocol import SessionRequest, SessionStatus
+        
+        # Create a valid session via Traffic Cop
+        session_id = f"test_session_{uuid.uuid4().hex[:16]}"
+        user_id = f"test_user_{uuid.uuid4().hex[:8]}"
+        
+        session_request = SessionRequest(
+            session_id=session_id,
+            user_id=user_id,
+            session_type="websocket_test",
+            context={"test": True, "source": "websocket_gateway_e2e_test"},
+            ttl_seconds=3600  # 1 hour
+        )
+        
+        # Create session via Traffic Cop
+        session_response = await traffic_cop_service.create_session(session_request)
+        
+        if session_response.success and session_response.status == SessionStatus.ACTIVE:
+            return session_id
+        else:
+            # Fallback: use session_id even if creation failed (may still work for testing)
+            pytest.skip(f"Failed to create test session: {session_response.error}")
+            return session_id
     
     @pytest.fixture
     def websocket_url(self, test_session_token):

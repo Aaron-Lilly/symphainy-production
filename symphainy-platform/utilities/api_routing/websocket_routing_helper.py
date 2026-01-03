@@ -63,15 +63,21 @@ class WebSocketRoutingHelper:
         Returns:
             List[str]: List of websocket path prefixes
         
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
+        
         Note:
-            If ConfigAdapter is not set, uses os.getenv as fallback or defaults to ["/ws", "/api/ws"]
+            ConfigAdapter must be set at startup. This is not a runtime service locator.
+            If ConfigAdapter is not available, that indicates a configuration problem.
         """
-        if WebSocketRoutingHelper._config_adapter:
-            ws_paths_str = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_PATHS", "/ws,/api/ws")
-        else:
-            # Fallback to os.getenv if ConfigAdapter not available
-            import os
-            ws_paths_str = os.getenv("WEBSOCKET_PATHS", "/ws,/api/ws")
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "at startup with ConfigAdapter from Public Works Foundation. "
+                "ConfigAdapter must be available before City Manager initialization."
+            )
+        
+        ws_paths_str = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_PATHS", "/ws,/api/ws")
         
         if isinstance(ws_paths_str, str):
             return [path.strip() for path in ws_paths_str.split(",") if path.strip()]
@@ -87,17 +93,22 @@ class WebSocketRoutingHelper:
         Returns:
             List[str]: List of allowed origins
         
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
+        
         Note:
-            If ConfigAdapter is not set, uses os.getenv as fallback
+            ConfigAdapter must be set at startup. This is not a runtime service locator.
+            If ConfigAdapter is not available, that indicates a configuration problem.
         """
-        if WebSocketRoutingHelper._config_adapter:
-            env = WebSocketRoutingHelper._config_adapter.get("ENVIRONMENT", "development")
-            cors_origins = WebSocketRoutingHelper._config_adapter.get("CORS_ORIGINS") or WebSocketRoutingHelper._config_adapter.get("API_CORS_ORIGINS")
-        else:
-            # Fallback to os.getenv if ConfigAdapter not available
-            import os
-            env = os.getenv("ENVIRONMENT", "development")
-            cors_origins = os.getenv("CORS_ORIGINS") or os.getenv("API_CORS_ORIGINS")
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "at startup with ConfigAdapter from Public Works Foundation. "
+                "ConfigAdapter must be available before City Manager initialization."
+            )
+        
+        env = WebSocketRoutingHelper._config_adapter.get("ENVIRONMENT", "development")
+        cors_origins = WebSocketRoutingHelper._config_adapter.get("CORS_ORIGINS") or WebSocketRoutingHelper._config_adapter.get("API_CORS_ORIGINS")
         
         if isinstance(env, str):
             env = env.lower()
@@ -133,15 +144,21 @@ class WebSocketRoutingHelper:
         Returns:
             bool: True if origin is allowed
         
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
+        
         Note:
-            If ConfigAdapter is not set, uses os.getenv as fallback
+            ConfigAdapter must be set at startup. This is not a runtime service locator.
+            If ConfigAdapter is not available, that indicates a configuration problem.
         """
-        if WebSocketRoutingHelper._config_adapter:
-            env = WebSocketRoutingHelper._config_adapter.get("ENVIRONMENT", "development")
-        else:
-            # Fallback to os.getenv if ConfigAdapter not available
-            import os
-            env = os.getenv("ENVIRONMENT", "development")
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "at startup with ConfigAdapter from Public Works Foundation. "
+                "ConfigAdapter must be available before City Manager initialization."
+            )
+        
+        env = WebSocketRoutingHelper._config_adapter.get("ENVIRONMENT", "development")
         
         if isinstance(env, str):
             env = env.lower()
@@ -182,17 +199,22 @@ class WebSocketRoutingHelper:
         Returns:
             Dict with max_connections_per_user and max_global_connections
         
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
+        
         Note:
-            If ConfigAdapter is not set, uses os.getenv as fallback
+            ConfigAdapter must be set at startup. This is not a runtime service locator.
+            If ConfigAdapter is not available, that indicates a configuration problem.
         """
-        if WebSocketRoutingHelper._config_adapter:
-            max_per_user = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_CONNECTIONS_PER_USER", "5")
-            max_global = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_GLOBAL_CONNECTIONS", "1000")
-        else:
-            # Fallback to os.getenv if ConfigAdapter not available
-            import os
-            max_per_user = os.getenv("WEBSOCKET_MAX_CONNECTIONS_PER_USER", "5")
-            max_global = os.getenv("WEBSOCKET_MAX_GLOBAL_CONNECTIONS", "1000")
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "at startup with ConfigAdapter from Public Works Foundation. "
+                "ConfigAdapter must be available before City Manager initialization."
+            )
+        
+        max_per_user = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_CONNECTIONS_PER_USER", "5")
+        max_global = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_GLOBAL_CONNECTIONS", "1000")
         
         return {
             "max_per_user": int(max_per_user) if isinstance(max_per_user, (str, int)) else 5,
@@ -207,17 +229,22 @@ class WebSocketRoutingHelper:
         Returns:
             Dict with max_messages_per_second and max_messages_per_minute
         
+        Raises:
+            ValueError: If ConfigAdapter is not set via set_config_adapter()
+        
         Note:
-            If ConfigAdapter is not set, uses os.getenv as fallback
+            ConfigAdapter must be set at startup. This is not a runtime service locator.
+            If ConfigAdapter is not available, that indicates a configuration problem.
         """
-        if WebSocketRoutingHelper._config_adapter:
-            max_per_second = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_MESSAGES_PER_SECOND", "10")
-            max_per_minute = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_MESSAGES_PER_MINUTE", "100")
-        else:
-            # Fallback to os.getenv if ConfigAdapter not available
-            import os
-            max_per_second = os.getenv("WEBSOCKET_MAX_MESSAGES_PER_SECOND", "10")
-            max_per_minute = os.getenv("WEBSOCKET_MAX_MESSAGES_PER_MINUTE", "100")
+        if not WebSocketRoutingHelper._config_adapter:
+            raise ValueError(
+                "ConfigAdapter is required. Call WebSocketRoutingHelper.set_config_adapter() "
+                "at startup with ConfigAdapter from Public Works Foundation. "
+                "ConfigAdapter must be available before City Manager initialization."
+            )
+        
+        max_per_second = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_MESSAGES_PER_SECOND", "10")
+        max_per_minute = WebSocketRoutingHelper._config_adapter.get("WEBSOCKET_MAX_MESSAGES_PER_MINUTE", "100")
         
         return {
             "max_per_second": int(max_per_second) if isinstance(max_per_second, (str, int)) else 10,

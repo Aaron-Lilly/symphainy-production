@@ -8,16 +8,37 @@ This file provides:
 - Infrastructure safety checks
 
 NOTE: Python path is configured in pytest.ini via the 'pythonpath' option.
-No need to manipulate sys.path here - pytest handles it automatically.
+We also ensure the path is set here as a fallback for reliability.
+This MUST happen before any other imports that depend on the platform code.
 """
 
+# CRITICAL: Set up Python path BEFORE any other imports
+# This ensures imports from symphainy-platform work even if pytest.ini doesn't apply
+import sys
+from pathlib import Path
+
+# Resolve paths relative to this conftest.py file
+_tests_dir = Path(__file__).parent.resolve()
+_platform_dir = _tests_dir.parent / "symphainy-platform"
+if _platform_dir.exists() and str(_platform_dir) not in sys.path:
+    sys.path.insert(0, str(_platform_dir))
+
+# Now safe to import other modules
 import pytest
 import asyncio
 import os
 import logging
 from typing import AsyncGenerator, Dict, Any, Optional
 from unittest.mock import Mock, AsyncMock
-from pathlib import Path
+
+# Pytest hook to ensure path is set before test collection
+def pytest_configure(config):
+    """Configure pytest - ensure Python path is set before test collection."""
+    # Double-check path is set (in case pytest.ini didn't work)
+    _tests_dir = Path(__file__).parent.resolve()
+    _platform_dir = _tests_dir.parent / "symphainy-platform"
+    if _platform_dir.exists() and str(_platform_dir) not in sys.path:
+        sys.path.insert(0, str(_platform_dir))
 
 # Import test configuration
 # Handle import path - pytest.ini should set pythonpath, but ensure it works
@@ -141,8 +162,8 @@ async def di_container():
     
     Uses real infrastructure when TEST_USE_REAL_INFRASTRUCTURE=true (default).
     """
-    from utilities.di_container.comprehensive_di_container_service import (
-        ComprehensiveDIContainerService,
+    from foundations.di_container.di_container_service import (
+        DIContainerService,
     )
     
     # Set TEST_MODE to enable test Supabase credentials
@@ -156,8 +177,8 @@ async def di_container():
         if TestConfig.SUPABASE_SERVICE_KEY:
             os.environ["SUPABASE_SERVICE_KEY"] = TestConfig.SUPABASE_SERVICE_KEY
     
-    container = ComprehensiveDIContainerService()
-    await container.initialize()
+    container = DIContainerService(realm_name="test")
+    # DIContainerService initializes itself in __init__, no separate initialize() call needed
     
     yield container
     
@@ -259,7 +280,7 @@ async def curator_foundation(di_container):
 @pytest.fixture
 async def librarian_service(di_container):
     """Librarian Service fixture."""
-    from smart_city.services.librarian_service.librarian_service import (
+    from backend.smart_city.services.librarian.librarian_service import (
         LibrarianService,
     )
     
@@ -276,7 +297,7 @@ async def librarian_service(di_container):
 @pytest.fixture
 async def data_steward_service(di_container):
     """Data Steward Service fixture."""
-    from smart_city.services.data_steward_service.data_steward_service import (
+    from backend.smart_city.services.data_steward.data_steward_service import (
         DataStewardService,
     )
     
@@ -293,7 +314,7 @@ async def data_steward_service(di_container):
 @pytest.fixture
 async def post_office_service(di_container):
     """Post Office Service fixture with WebSocket Gateway."""
-    from smart_city.services.post_office.post_office_service import PostOfficeService
+    from backend.smart_city.services.post_office.post_office_service import PostOfficeService
     
     service = PostOfficeService(di_container)
     await service.initialize()
@@ -308,7 +329,7 @@ async def post_office_service(di_container):
 @pytest.fixture
 async def traffic_cop_service(di_container):
     """Traffic Cop Service fixture (for session validation)."""
-    from smart_city.services.traffic_cop.traffic_cop_service import TrafficCopService
+    from backend.smart_city.services.traffic_cop.traffic_cop_service import TrafficCopService
     
     service = TrafficCopService(di_container)
     await service.initialize()

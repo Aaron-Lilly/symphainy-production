@@ -1278,6 +1278,19 @@ async def lifespan(app: FastAPI):
         # Register API routers (NEW - connects frontend to new architecture)
         # CRITICAL: API routers are required for frontend to function
         try:
+            # Set ConfigAdapter on WebSocketRoutingHelper at startup (before API router registration)
+            # ConfigAdapter must be available before City Manager initialization per architecture
+            try:
+                from utilities.api_routing.websocket_routing_helper import WebSocketRoutingHelper
+                public_works = platform_orchestrator.foundation_services.get("PublicWorksFoundationService")
+                if public_works and hasattr(public_works, 'config_adapter') and public_works.config_adapter:
+                    WebSocketRoutingHelper.set_config_adapter(public_works.config_adapter)
+                    logger.info("✅ ConfigAdapter set on WebSocketRoutingHelper")
+                else:
+                    logger.warning("⚠️ ConfigAdapter not available - WebSocketRoutingHelper will fail if used")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to set ConfigAdapter on WebSocketRoutingHelper: {e}")
+            
             from backend.api import register_api_routers
             await register_api_routers(app, platform_orchestrator)
             logger.info("✅ API routers registered successfully")

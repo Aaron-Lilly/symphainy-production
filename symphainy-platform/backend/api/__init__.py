@@ -76,53 +76,80 @@ async def register_api_routers(app: FastAPI, platform_orchestrator) -> None:
         logger.info("✅ Universal pillar router registered with FastAPI app")
         
         # Register WebSocket Gateway router (NEW - Post Office Gateway)
+        # Architecture: PostOfficeService is a Smart City role, lifecycle-managed by City Manager
+        # Nothing bypasses Smart City - use City Manager exclusively
         try:
             from backend.api.websocket_gateway_router import router as websocket_gateway_router, set_websocket_gateway_service
-            from backend.smart_city.services.post_office.websocket_gateway_service import WebSocketGatewayService
             
-            # Discover Post Office service via Curator
-            curator = platform_orchestrator.foundation_services.get("CuratorFoundationService")
+            # Get City Manager (must be available - it's initialized before API router registration)
+            city_manager = platform_orchestrator.managers.get("city_manager")
+            if not city_manager:
+                logger.error("❌ City Manager not available - cannot register WebSocket Gateway router")
+                logger.error("   City Manager must be initialized before API router registration")
+                raise RuntimeError("City Manager not available - platform startup failure")
+            
+            # Get PostOfficeService via City Manager (proper authority)
+            # City Manager knows if PostOfficeService is already active or will activate it if needed
             post_office_service = None
             
-            if curator:
-                try:
-                    post_office_service = await curator.discover_service_by_name("PostOfficeService")
-                    if post_office_service:
-                        logger.info("✅ Discovered PostOfficeService via Curator")
-                except Exception as e:
-                    logger.warning(f"⚠️ PostOfficeService not available via Curator: {e}")
+            # Check if PostOfficeService is already active
+            if "post_office" in city_manager.smart_city_services:
+                service_info = city_manager.smart_city_services["post_office"]
+                if service_info.get("status") == "active" and service_info.get("instance"):
+                    post_office_service = service_info["instance"]
+                    logger.info("✅ PostOfficeService already active (retrieved from City Manager)")
             
-            # Fallback: Try to get from City Manager
+            # If not active, request activation via City Manager
             if not post_office_service:
+                logger.info("🔧 Requesting PostOfficeService activation via City Manager...")
                 try:
-                    city_manager = platform_orchestrator.managers.get("city_manager")
-                    if city_manager and hasattr(city_manager, 'get_smart_city_service'):
-                        post_office_service = await city_manager.get_smart_city_service("PostOfficeService")
-                        if post_office_service:
-                            logger.info("✅ Retrieved PostOfficeService via City Manager")
+                    # Pass list directly as request parameter (City Manager handles both protocol objects and lists)
+                    activation_result = await city_manager.orchestrate_realm_startup(["post_office"])
+                    # RealmStartupResponse is a dataclass, access attributes directly
+                    if activation_result and activation_result.success:
+                        # Get the service instance after activation
+                        if "post_office" in city_manager.smart_city_services:
+                            service_info = city_manager.smart_city_services["post_office"]
+                            post_office_service = service_info.get("instance")
+                            if post_office_service:
+                                logger.info("✅ PostOfficeService activated and retrieved via City Manager")
+                    else:
+                        error_msg = activation_result.error if activation_result and hasattr(activation_result, 'error') else "Unknown error"
+                        if not activation_result:
+                            error_msg = "Activation returned no result"
+                        logger.error(f"❌ Failed to activate PostOfficeService: {error_msg}")
                 except Exception as e:
-                    logger.warning(f"⚠️ PostOfficeService not available via City Manager: {e}")
+                    logger.error(f"❌ Failed to activate PostOfficeService via City Manager: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
             
-            # Create WebSocket Gateway Service
+            # Use existing WebSocketGatewayService instance from PostOfficeService
+            # PostOfficeService.initialize() already creates and initializes WebSocketGatewayService
             if post_office_service:
-                websocket_gateway_service = WebSocketGatewayService(
-                    di_container=platform_orchestrator.di_container,
-                    post_office_service=post_office_service
-                )
-                
-                # Initialize the gateway service
-                initialized = await websocket_gateway_service.initialize()
-                if initialized:
-                    # Set in router
-                    set_websocket_gateway_service(websocket_gateway_service)
+                if hasattr(post_office_service, 'websocket_gateway_service') and post_office_service.websocket_gateway_service:
+                    websocket_gateway_service = post_office_service.websocket_gateway_service
                     
-                    # Register router
-                    app.include_router(websocket_gateway_router)
-                    logger.info("✅ WebSocket Gateway router registered with FastAPI app")
+                    # Verify it's ready
+                    if await websocket_gateway_service.is_ready():
+                        # Set in router
+                        set_websocket_gateway_service(websocket_gateway_service)
+                        
+                        # Register router
+                        app.include_router(websocket_gateway_router)
+                        logger.info("✅ WebSocket Gateway router registered with FastAPI app")
+                    else:
+                        logger.warning("⚠️ WebSocket Gateway Service not ready - router not registered")
                 else:
-                    logger.warning("⚠️ WebSocket Gateway Service not ready - router not registered")
+                    logger.warning("⚠️ PostOfficeService does not have WebSocketGatewayService - router not registered")
+                    logger.warning("   PostOfficeService may not be fully initialized")
             else:
-                logger.warning("⚠️ PostOfficeService not available - WebSocket Gateway router not registered")
+                logger.error("❌ PostOfficeService not available - WebSocket Gateway router not registered")
+                logger.error("   This indicates a Smart City realm startup failure")
+                
+        except ImportError as e:
+            logger.error(f"❌ Failed to import WebSocket Gateway router: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
                 
         except ImportError as e:
             logger.error(f"❌ Failed to import WebSocket Gateway router: {e}")

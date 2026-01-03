@@ -51,8 +51,8 @@ export default function DualAgentChat({ sessionToken, onContextUpdate }: DualAge
     if (!sessionToken) return;
 
     const wsUrl = activeAgent === "guide" 
-      ? `ws://localhost:8000/api/ws/experience/guide-chat`
-      : `ws://localhost:8000/api/ws/experience/specialist-chat`;
+      ? `ws://localhost/ws?session_token=${sessionToken || ''}&channel=guide`
+      : `ws://localhost/ws?session_token=${sessionToken || ''}&channel=specialist`;
 
     const ws = new WebSocket(wsUrl);
     setWebsocket(ws);

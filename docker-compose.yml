@@ -616,13 +616,14 @@ services:
       - "traefik.http.routers.backend-auth.middlewares=backend-chain@file"
       - "traefik.http.routers.backend-auth.priority=100"  # HIGH priority to match auth routes FIRST
       
-      # WebSocket router (bypasses ForwardAuth - websockets handle auth via session_token query param)
+      # WebSocket Gateway router (NEW - Post Office Gateway at /ws)
+      # Bypasses ForwardAuth - websockets handle auth via session_token query param
       # Handler-level authentication ensures security while avoiding ForwardAuth issues with websocket handshake
-      - "traefik.http.routers.backend-websocket.rule=PathPrefix(`/api/ws`)"
-      - "traefik.http.routers.backend-websocket.entrypoints=web"
-      - "traefik.http.routers.backend-websocket.service=backend"
-      - "traefik.http.routers.backend-websocket.middlewares=websocket-chain@file"  # WebSocket-specific middleware chain
-      - "traefik.http.routers.backend-websocket.priority=95"  # High priority, but lower than auth routes
+      - "traefik.http.routers.backend-websocket-gateway.rule=Path(`/ws`)"
+      - "traefik.http.routers.backend-websocket-gateway.entrypoints=web"
+      - "traefik.http.routers.backend-websocket-gateway.service=backend"
+      - "traefik.http.routers.backend-websocket-gateway.middlewares=websocket-chain@file"  # WebSocket-specific middleware chain
+      - "traefik.http.routers.backend-websocket-gateway.priority=96"  # High priority for transport service
       
       # File Upload router (bypasses ForwardAuth to avoid timeout during large file uploads)
       # Handler-level authentication ensures security while avoiding ForwardAuth timeout
@@ -643,7 +644,7 @@ services:
       # Main backend router with authentication (Phase 1: Security Integration)
       # Uses Traefik ForwardAuth middleware for Supabase JWT validation
       # Excludes upload-file, process-file paths, websocket paths, and session creation to avoid conflicts
-      - "traefik.http.routers.backend.rule=(Host(`api.localhost`) || PathPrefix(`/api`)) && !PathPrefix(`/api/v1/content-pillar/upload-file`) && !PathPrefix(`/api/v1/content-pillar/process-file`) && !PathPrefix(`/api/ws`) && !Path(`/api/v1/session/create-user-session`)"
+      - "traefik.http.routers.backend.rule=(Host(`api.localhost`) || PathPrefix(`/api`)) && !PathPrefix(`/api/v1/content-pillar/upload-file`) && !PathPrefix(`/api/v1/content-pillar/process-file`) && !Path(`/ws`) && !Path(`/api/v1/session/create-user-session`)"
       - "traefik.http.routers.backend.entrypoints=web"
       - "traefik.http.services.backend.loadbalancer.server.port=8000"
       - "traefik.http.routers.backend.middlewares=backend-chain-with-auth@file"

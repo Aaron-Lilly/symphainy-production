@@ -721,30 +721,27 @@ class ContentProcessingAgent(BusinessSpecialistAgentBase):
         try:
             self.logger.info(f"🤖 Enhancing metadata extraction for file: {file_id}")
             
-            # Use MCP tool to get analysis (orchestrator calls enabling services)
-            if self.orchestrator and hasattr(self.orchestrator, 'mcp_server'):
-                mcp_server = self.orchestrator.mcp_server
-                try:
-                    analysis = await mcp_server.execute_tool(
-                        "analyze_document_tool",
-                        {
-                            "document_id": file_id,
-                            "analysis_types": ["metadata", "entities"]
-                        }
-                    )
-                    # Agent enhances with reasoning
-                    enhanced = self._apply_agent_reasoning_to_metadata(analysis, parsed_result)
-                    return enhanced
-                except Exception as mcp_error:
-                    self.logger.warning(f"⚠️ MCP tool enhancement failed: {mcp_error}, using parsed result")
-            
-            # Fallback: Use parsed result directly
-            return {
-                "success": True,
-                "metadata": parsed_result.get("metadata", {}),
-                "enhanced": False,
-                "note": "MCP server not available"
-            }
+            # Use MCP tool via execute_mcp_tool() helper (unified pattern)
+            try:
+                analysis = await self.execute_mcp_tool(
+                    "content_analyze_document",  # Use unified tool name from MCP Server
+                    {
+                        "document_id": file_id,
+                        "analysis_types": ["metadata", "entities"]
+                    }
+                )
+                # Agent enhances with reasoning
+                enhanced = self._apply_agent_reasoning_to_metadata(analysis, parsed_result)
+                return enhanced
+            except Exception as mcp_error:
+                self.logger.warning(f"⚠️ MCP tool enhancement failed: {mcp_error}, using parsed result")
+                # Fallback: Use parsed result directly
+                return {
+                    "success": True,
+                    "metadata": parsed_result.get("metadata", {}),
+                    "enhanced": False,
+                    "note": "MCP tool execution failed"
+                }
             
         except Exception as e:
             self.logger.error(f"❌ Metadata enhancement failed: {e}")
@@ -773,30 +770,27 @@ class ContentProcessingAgent(BusinessSpecialistAgentBase):
         try:
             self.logger.info(f"🤖 Enhancing content insights for file: {file_id}")
             
-            # Use MCP tool to get analysis (orchestrator calls enabling services)
-            if self.orchestrator and hasattr(self.orchestrator, 'mcp_server'):
-                mcp_server = self.orchestrator.mcp_server
-                try:
-                    analysis = await mcp_server.execute_tool(
-                        "analyze_document_tool",
-                        {
-                            "document_id": file_id,
-                            "analysis_types": ["structure", "entities", "semantic"]
-                        }
-                    )
-                    # Agent enhances with reasoning
-                    enhanced = self._apply_agent_reasoning_to_insights(analysis, parsed_result)
-                    return enhanced
-                except Exception as mcp_error:
-                    self.logger.warning(f"⚠️ MCP tool enhancement failed: {mcp_error}, using parsed result")
-            
-            # Fallback: Use parsed result directly
-            return {
-                "success": True,
-                "insights": parsed_result.get("insights", {}),
-                "enhanced": False,
-                "note": "MCP server not available"
-            }
+            # Use MCP tool via execute_mcp_tool() helper (unified pattern)
+            try:
+                analysis = await self.execute_mcp_tool(
+                    "content_analyze_document",  # Use unified tool name from MCP Server
+                    {
+                        "document_id": file_id,
+                        "analysis_types": ["structure", "entities", "semantic"]
+                    }
+                )
+                # Agent enhances with reasoning
+                enhanced = self._apply_agent_reasoning_to_insights(analysis, parsed_result)
+                return enhanced
+            except Exception as mcp_error:
+                self.logger.warning(f"⚠️ MCP tool enhancement failed: {mcp_error}, using parsed result")
+                # Fallback: Use parsed result directly
+                return {
+                    "success": True,
+                    "insights": parsed_result.get("insights", {}),
+                    "enhanced": False,
+                    "note": "MCP tool execution failed"
+                }
             
         except Exception as e:
             self.logger.error(f"❌ Content insights enhancement failed: {e}")
@@ -825,31 +819,28 @@ class ContentProcessingAgent(BusinessSpecialistAgentBase):
         try:
             self.logger.info(f"🤖 Recommending format optimization for file: {file_id}")
             
-            # Use MCP tool to get format recommendation (orchestrator calls FormatComposerService)
-            if self.orchestrator and hasattr(self.orchestrator, 'mcp_server'):
-                mcp_server = self.orchestrator.mcp_server
-                try:
-                    # Analyze content structure
-                    analysis = await mcp_server.execute_tool(
-                        "analyze_document_tool",
-                        {
-                            "document_id": file_id,
-                            "analysis_types": ["structure"]
-                        }
-                    )
-                    # Agent recommends format based on content structure
-                    recommendation = self._recommend_format_from_structure(analysis, parsed_result)
-                    return recommendation
-                except Exception as mcp_error:
-                    self.logger.warning(f"⚠️ MCP tool recommendation failed: {mcp_error}")
-            
-            # Fallback: Basic recommendation
-            return {
-                "success": True,
-                "recommended_format": "json_chunks",  # Default
-                "reason": "Unable to analyze structure",
-                "note": "MCP server not available"
-            }
+            # Use MCP tool via execute_mcp_tool() helper (unified pattern)
+            try:
+                # Analyze content structure
+                analysis = await self.execute_mcp_tool(
+                    "content_analyze_document",  # Use unified tool name from MCP Server
+                    {
+                        "document_id": file_id,
+                        "analysis_types": ["structure"]
+                    }
+                )
+                # Agent recommends format based on content structure
+                recommendation = self._recommend_format_from_structure(analysis, parsed_result)
+                return recommendation
+            except Exception as mcp_error:
+                self.logger.warning(f"⚠️ MCP tool recommendation failed: {mcp_error}")
+                # Fallback: Basic recommendation
+                return {
+                    "success": True,
+                    "recommended_format": "json_chunks",  # Default
+                    "reason": "Unable to analyze structure",
+                    "note": "MCP tool execution failed"
+                }
             
         except Exception as e:
             self.logger.error(f"❌ Format recommendation failed: {e}")

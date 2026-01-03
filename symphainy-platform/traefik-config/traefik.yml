@@ -9,12 +9,14 @@ api:
 entryPoints:
   web:
     address: ":80"
-    # Increase timeouts for file uploads
+    # Increase timeouts for file uploads and WebSocket connections
     transport:
       respondingTimeouts:
         readTimeout: 600s      # 10 minutes for large file processing
         writeTimeout: 600s     # 10 minutes for large file processing
-        idleTimeout: 300s      # 5 minutes idle timeout
+        idleTimeout: 1800s     # 30 minutes for WebSocket long-lived connections (increased from 5 minutes)
+        # WebSocket connections are long-lived and may be idle for extended periods
+        # This timeout ensures connections remain open during normal usage
   websecure:
     address: ":443"
 

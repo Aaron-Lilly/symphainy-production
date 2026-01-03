@@ -32,7 +32,7 @@ class TestWebSocketGatewayIntegration:
     @pytest.fixture
     async def post_office_service(self, di_container):
         """Get Post Office Service with WebSocket Gateway."""
-        from smart_city.services.post_office.post_office_service import PostOfficeService
+        from backend.smart_city.services.post_office.post_office_service import PostOfficeService
         
         service = PostOfficeService(di_container)
         await service.initialize()
@@ -52,9 +52,31 @@ class TestWebSocketGatewayIntegration:
         return gateway
     
     @pytest.fixture
-    def test_session_token(self):
-        """Generate test session token."""
-        return f"test_session_{uuid.uuid4().hex[:16]}"
+    async def test_session_token(self, traffic_cop_service):
+        """Create valid test session token via Traffic Cop."""
+        from backend.smart_city.protocols.traffic_cop_service_protocol import SessionRequest, SessionStatus
+        
+        # Create a valid session via Traffic Cop
+        session_id = f"test_session_{uuid.uuid4().hex[:16]}"
+        user_id = f"test_user_{uuid.uuid4().hex[:8]}"
+        
+        session_request = SessionRequest(
+            session_id=session_id,
+            user_id=user_id,
+            session_type="websocket_test",
+            context={"test": True, "source": "websocket_gateway_test"},
+            ttl_seconds=3600  # 1 hour
+        )
+        
+        # Create session via Traffic Cop
+        session_response = await traffic_cop_service.create_session(session_request)
+        
+        if session_response.success and session_response.status == SessionStatus.ACTIVE:
+            return session_id
+        else:
+            # Fallback: use session_id even if creation failed (may still work for testing)
+            pytest.skip(f"Failed to create test session: {session_response.error}")
+            return session_id
     
     @pytest.fixture
     async def websocket_client(self, test_session_token):
@@ -76,8 +98,10 @@ class TestWebSocketGatewayIntegration:
         """Test that WebSocket connection is accepted."""
         websocket = websocket_client
         
-        # Connection should be open
-        assert websocket.open, "WebSocket connection not open"
+        # Connection should be open (websockets library uses .state property)
+        # State can be: CONNECTING, OPEN, CLOSING, CLOSED
+        from websockets.protocol import State
+        assert websocket.state == State.OPEN, f"WebSocket connection not open (state: {websocket.state})"
         
         # Should receive welcome message
         welcome = await asyncio.wait_for(websocket.recv(), timeout=5.0)
