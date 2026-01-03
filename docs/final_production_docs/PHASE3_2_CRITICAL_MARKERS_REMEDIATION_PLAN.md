@@ -498,6 +498,334 @@ async def get_soa_apis(self) -> Dict[str, Any]:
 
 ---
 
+## Phase 3.2.5: MCP Server Architecture Overhaul (Days 5-7)
+
+**Priority:** 🔴 **HIGH** - Architectural anti-pattern that violates agentic-forward design
+
+### Problem Statement
+
+**Current Anti-Pattern:**
+Agents are accessing services directly (SOA APIs, service methods) instead of using MCP tools. This violates the agentic-forward architecture principle where:
+- **MCP Servers** expose business capabilities as MCP tools
+- **Agents** use MCP tools (never access services directly)
+- **MCP Tools** provide agent-optimized interfaces (different from SOA APIs)
+
+**Architectural Violations Found:**
+1. Agents calling `get_content_steward_api()`, `get_file_parser_service()`, etc. directly
+2. Agents accessing orchestrator methods directly instead of MCP tools
+3. Inconsistent MCP server organization (some at orchestrator level, some at service level)
+4. Missing MCP servers for some realms (Content, Insights, Solution)
+
+### Target Architecture
+
+**One MCP Server Per Realm:**
+```
+Content Realm
+  └─ ContentMCPServer
+      ├─ Exposes Content realm SOA APIs as MCP tools
+      └─ Tools: content_upload_file, content_parse_file, content_get_file_metadata, etc.
+
+Insights Realm
+  └─ InsightsMCPServer
+      ├─ Exposes Insights realm SOA APIs as MCP tools
+      └─ Tools: insights_analyze_data, insights_generate_mapping, insights_extract_insights, etc.
+
+Journey Realm
+  └─ JourneyMCPServer (or per-orchestrator MCP servers)
+      ├─ Exposes Journey orchestrator capabilities as MCP tools
+      └─ Tools: journey_upload_content, journey_process_insights, journey_create_workflow, etc.
+
+Solution Realm
+  └─ SolutionMCPServer
+      ├─ Exposes Solution orchestrator capabilities as MCP tools
+      └─ Tools: solution_orchestrate_data, solution_orchestrate_insights, solution_create_poc, etc.
+
+Business Enablement Realm
+  └─ BusinessEnablementMCPServer
+      ├─ Exposes enabling services as MCP tools
+      └─ Tools: enabling_format_compose, enabling_export_format, enabling_coexistence_analyze, etc.
+
+Smart City Realm
+  └─ SmartCityMCPServer (already exists - unified)
+      ├─ Exposes all Smart City services as MCP tools (namespaced)
+      └─ Tools: librarian_*, data_steward_*, content_steward_*, etc.
+```
+
+**Agent Access Pattern:**
+```
+Agent
+  ↓ (calls MCP tool via orchestrator's MCP server)
+Orchestrator.mcp_server.execute_tool("content_upload_file", {...})
+  ↓ (MCP server routes to orchestrator method)
+Orchestrator.handle_content_upload(...)
+  ↓ (orchestrator calls realm services)
+Realm Service (FileParserService, ContentSteward, etc.)
+```
+
+**NOT:**
+```
+❌ Agent → Direct service call (get_content_steward_api().process_upload(...))
+❌ Agent → Direct orchestrator call (orchestrator.handle_content_upload(...))
+```
+
+### Remediation Steps
+
+#### Step 1: Audit Current Agent Access Patterns (Day 5, Morning)
+
+**Action:**
+1. Search for all agent files that access services directly
+2. Identify patterns:
+   - `get_content_steward_api()`
+   - `get_file_parser_service()`
+   - `get_enabling_service()`
+   - Direct orchestrator method calls
+   - Direct SOA API calls
+
+**Files to Check:**
+- All agent files in `backend/*/agents/`
+- All agent files in `backend/*/orchestrators/*/agents/`
+
+**Create Audit Report:**
+- List all agents with direct service access
+- Document which services they're accessing
+- Map to required MCP tools
+
+#### Step 2: Create/Update Realm MCP Servers (Day 5, Afternoon - Day 6)
+
+**2.1 Content Realm MCP Server**
+
+**File:** `backend/content/mcp_server/content_mcp_server.py` (NEW)
+
+**Purpose:** Expose Content realm SOA APIs as MCP tools
+
+**Tools to Expose:**
+- `content_upload_file` → `ContentManagerService.upload_file()`
+- `content_parse_file` → `FileParserService.parse_file()`
+- `content_get_file_metadata` → `ContentSteward.get_file_metadata()`
+- `content_list_files` → `ContentSteward.list_files()`
+- `content_create_embeddings` → `EmbeddingService.create_embeddings()`
+
+**Implementation Pattern:**
+```python
+class ContentMCPServer(MCPServerBase):
+    """MCP Server for Content Realm - exposes Content realm SOA APIs as MCP tools."""
+    
+    def __init__(self, content_manager_service, di_container):
+        super().__init__(
+            service_name="content_mcp",
+            di_container=di_container
+        )
+        self.content_manager = content_manager_service
+    
+    def register_server_tools(self):
+        # Register tools from ContentManagerService SOA APIs
+        for api_name, api_def in self.content_manager.get_soa_apis().items():
+            self.register_tool(
+                tool_name=f"content_{api_name}",
+                handler=getattr(self, f"_handle_{api_name}"),
+                input_schema=api_def.get("input_schema", {})
+            )
+    
+    async def _handle_upload_file(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle content_upload_file MCP tool."""
+        return await self.content_manager.upload_file(**parameters)
+```
+
+**2.2 Insights Realm MCP Server**
+
+**File:** `backend/insights/mcp_server/insights_mcp_server.py` (NEW)
+
+**Purpose:** Expose Insights realm SOA APIs as MCP tools
+
+**Tools to Expose:**
+- `insights_analyze_data` → `DataAnalyzerService.analyze_data()`
+- `insights_generate_mapping` → `DataMappingAgent.generate_mapping()`
+- `insights_extract_insights` → `InsightsGeneratorService.extract_insights()`
+- `insights_query_data` → `InsightsQueryAgent.query_data()`
+
+**2.3 Solution Realm MCP Server**
+
+**File:** `backend/solution/mcp_server/solution_mcp_server.py` (NEW)
+
+**Purpose:** Expose Solution orchestrator capabilities as MCP tools
+
+**Tools to Expose:**
+- `solution_orchestrate_data` → `DataSolutionOrchestratorService.orchestrate_data_ingest()`
+- `solution_orchestrate_insights` → `InsightsSolutionOrchestratorService.orchestrate_insights()`
+- `solution_create_poc` → `POCGenerationService.create_poc()`
+- `solution_generate_roadmap` → `RoadmapGenerationService.generate_roadmap()`
+
+**2.4 Business Enablement Realm MCP Server**
+
+**File:** `backend/business_enablement/mcp_server/business_enablement_mcp_server.py` (NEW or UPDATE)
+
+**Purpose:** Expose enabling services as MCP tools
+
+**Tools to Expose:**
+- `enabling_format_compose` → `FormatComposerService.compose_format()`
+- `enabling_export_format` → `ExportFormatterService.format_export()`
+- `enabling_coexistence_analyze` → `CoexistenceAnalysisService.analyze_coexistence()`
+- `enabling_sop_build` → `SOPBuilderService.build_sop()`
+- All other enabling services
+
+**2.5 Journey Realm MCP Servers**
+
+**Current State:** Journey orchestrators have individual MCP servers (e.g., `ContentAnalysisMCPServer`)
+
+**Decision:** Keep per-orchestrator MCP servers OR create unified Journey MCP server?
+
+**Option A: Keep Per-Orchestrator (Recommended)**
+- Each Journey orchestrator has its own MCP server
+- Tools are namespaced by orchestrator: `content_journey_*`, `insights_journey_*`, etc.
+- Simpler to maintain, clear ownership
+
+**Option B: Unified Journey MCP Server**
+- Single MCP server for all Journey orchestrators
+- Tools namespaced: `journey_content_*`, `journey_insights_*`, etc.
+- More complex routing logic
+
+**Recommendation:** **Option A** - Keep per-orchestrator MCP servers, but ensure they expose orchestrator capabilities (not direct service access).
+
+#### Step 3: Update Orchestrators to Initialize MCP Servers (Day 6)
+
+**Action:**
+1. Ensure all orchestrators initialize their MCP servers
+2. MCP servers should expose orchestrator methods as tools (not service methods)
+3. Orchestrators set themselves on agents: `agent.set_orchestrator(self)`
+
+**Pattern:**
+```python
+class ContentJourneyOrchestrator(OrchestratorBase):
+    async def initialize(self):
+        # ... existing initialization ...
+        
+        # Initialize MCP server
+        self.mcp_server = ContentJourneyMCPServer(
+            orchestrator=self,
+            di_container=self.di_container
+        )
+        await self.mcp_server.initialize()
+        
+        # Set orchestrator on agents (for MCP tool access)
+        for agent in self.agents:
+            agent.set_orchestrator(self)
+```
+
+#### Step 4: Update Agents to Use MCP Tools (Day 7)
+
+**4.1 Remove Direct Service Access**
+
+**Anti-Pattern to Remove:**
+```python
+# ❌ REMOVE: Direct service access
+content_steward = await self.get_content_steward_api()
+result = await content_steward.process_upload(...)
+
+# ❌ REMOVE: Direct orchestrator method call
+result = await self.orchestrator.handle_content_upload(...)
+```
+
+**4.2 Use MCP Tools Instead**
+
+**Correct Pattern:**
+```python
+# ✅ USE: MCP tool via orchestrator's MCP server
+if self.orchestrator and hasattr(self.orchestrator, 'mcp_server'):
+    result = await self.orchestrator.mcp_server.execute_tool(
+        "content_upload_file",
+        {
+            "file_data": file_data,
+            "filename": filename,
+            "file_type": file_type,
+            "user_context": user_context
+        }
+    )
+else:
+    raise ValueError("Orchestrator or MCP server not available")
+```
+
+**4.3 Update Agent Base Classes**
+
+**File:** `backend/business_enablement/protocols/business_specialist_agent_protocol.py`
+
+**Add Helper Method:**
+```python
+async def execute_mcp_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute MCP tool via orchestrator's MCP server.
+    
+    This is the PRIMARY method for agents to interact with services.
+    Agents should NEVER access services directly.
+    """
+    if not self.orchestrator:
+        raise ValueError(
+            f"Orchestrator not set for {self.agent_name}. "
+            f"Cannot execute MCP tool '{tool_name}'. "
+            f"Ensure orchestrator calls set_orchestrator(agent) during initialization."
+        )
+    
+    if not hasattr(self.orchestrator, 'mcp_server') or self.orchestrator.mcp_server is None:
+        raise ValueError(
+            f"Orchestrator {self.orchestrator.__class__.__name__} does not have MCP server. "
+            f"Cannot execute MCP tool '{tool_name}'."
+        )
+    
+    return await self.orchestrator.mcp_server.execute_tool(tool_name, parameters)
+```
+
+**4.4 Update All Agents**
+
+**Files to Update:**
+- `backend/journey/orchestrators/content_journey_orchestrator/agents/content_processing_agent.py`
+- `backend/journey/orchestrators/content_journey_orchestrator/agents/content_liaison_agent.py`
+- `backend/insights/agents/insights_specialist_agent.py`
+- `backend/insights/agents/insights_liaison_agent.py`
+- `backend/business_enablement/delivery_manager/mvp_pillar_orchestrators/operations_orchestrator/agents/operations_specialist_agent.py`
+- All other agent files
+
+**Pattern:**
+```python
+# Replace all direct service access with MCP tool calls
+# Before:
+content_steward = await self.get_content_steward_api()
+result = await content_steward.process_upload(...)
+
+# After:
+result = await self.execute_mcp_tool(
+    "content_upload_file",
+    {
+        "file_data": file_data,
+        "filename": filename,
+        "file_type": file_type,
+        "user_context": user_context
+    }
+)
+```
+
+#### Step 5: Verify and Test (Day 7, Afternoon)
+
+**Verification Steps:**
+1. **No Direct Service Access:**
+   - Search for `get_content_steward_api()`, `get_file_parser_service()`, etc. in agent files
+   - Should find zero results (or only in orchestrators/services, not agents)
+
+2. **MCP Tools Available:**
+   - Verify all realm MCP servers are initialized
+   - Verify all required tools are registered
+   - Test tool execution via MCP server
+
+3. **Agent Functionality:**
+   - Test agent operations using MCP tools
+   - Verify agents can complete their workflows
+   - Verify error handling works correctly
+
+4. **Architecture Compliance:**
+   - Verify no circular dependencies
+   - Verify proper realm boundaries
+   - Verify MCP tools expose correct capabilities
+
+---
+
 ## Implementation Order
 
 ### Day 1: Remove TEMPORARY Shortcuts (Part 1)
@@ -524,6 +852,27 @@ async def get_soa_apis(self) -> Dict[str, Any]:
 2. ✅ Update base class documentation
 3. ✅ Verify all services override get_soa_apis()
 4. ✅ Add implementations for any missing overrides
+
+### Day 5: MCP Server Architecture Overhaul (Part 1)
+1. ✅ Audit current agent access patterns
+2. ✅ Create audit report of direct service access
+3. ✅ Design realm MCP server architecture
+4. ✅ Create Content Realm MCP Server
+5. ✅ Create Insights Realm MCP Server
+
+### Day 6: MCP Server Architecture Overhaul (Part 2)
+1. ✅ Create Solution Realm MCP Server
+2. ✅ Create/Update Business Enablement Realm MCP Server
+3. ✅ Update Journey orchestrator MCP servers
+4. ✅ Update orchestrators to initialize MCP servers
+5. ✅ Verify MCP server initialization
+
+### Day 7: MCP Server Architecture Overhaul (Part 3)
+1. ✅ Update agent base classes with execute_mcp_tool() helper
+2. ✅ Update all agents to use MCP tools
+3. ✅ Remove direct service access from agents
+4. ✅ Test agent functionality with MCP tools
+5. ✅ Verify architecture compliance
 
 ---
 
@@ -557,8 +906,12 @@ async def get_soa_apis(self) -> Dict[str, Any]:
 | Permissions properly propagated | ⏳ Pending | Verify from Universal Pillar Router |
 | GCS UUID issue clarified | ⏳ Pending | Verify implementation and documentation |
 | Base class properly documented | ⏳ Pending | Verify all services override method |
+| MCP servers created for all realms | ⏳ Pending | Content, Insights, Solution, Business Enablement |
+| Agents use MCP tools (no direct service access) | ⏳ Pending | Verify zero direct service calls in agents |
+| MCP tools expose all required capabilities | ⏳ Pending | Verify tool coverage matches agent needs |
 | All tests passing | ⏳ Pending | Run full test suite |
 | Architecture aligned with solution-centric pattern | ⏳ Pending | Verify proper realm organization |
+| Agentic-forward architecture enforced | ⏳ Pending | Verify agents only use MCP tools |
 
 ---
 
