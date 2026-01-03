@@ -73,4 +73,21 @@ class PostOfficeServiceProtocol(ServiceProtocol, Protocol):
     async def orchestrate_service_discovery(self, service_type: str, realm: Optional[str] = None) -> Dict[str, Any]:
         """Orchestrate service discovery and location."""
         ...
+    
+    # WebSocket Gateway Methods (Phase 2)
+    async def get_websocket_endpoint(self, session_token: str, realm: str) -> Dict[str, Any]:
+        """Get WebSocket endpoint URL for realm."""
+        ...
+    
+    async def publish_to_agent_channel(self, channel: str, message: Dict[str, Any], realm: str) -> Dict[str, Any]:
+        """Publish message to agent channel."""
+        ...
+    
+    async def subscribe_to_channel(self, channel: str, callback: Any, realm: str) -> Dict[str, Any]:
+        """Subscribe to channel for realm."""
+        ...
+    
+    async def send_to_connection(self, connection_id: str, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Send message to specific WebSocket connection."""
+        ...
 

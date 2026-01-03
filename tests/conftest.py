@@ -290,6 +290,36 @@ async def data_steward_service(di_container):
         await service.shutdown()
 
 
+@pytest.fixture
+async def post_office_service(di_container):
+    """Post Office Service fixture with WebSocket Gateway."""
+    from smart_city.services.post_office.post_office_service import PostOfficeService
+    
+    service = PostOfficeService(di_container)
+    await service.initialize()
+    
+    yield service
+    
+    # Cleanup
+    if hasattr(service, "shutdown"):
+        await service.shutdown()
+
+
+@pytest.fixture
+async def traffic_cop_service(di_container):
+    """Traffic Cop Service fixture (for session validation)."""
+    from smart_city.services.traffic_cop.traffic_cop_service import TrafficCopService
+    
+    service = TrafficCopService(di_container)
+    await service.initialize()
+    
+    yield service
+    
+    # Cleanup
+    if hasattr(service, "shutdown"):
+        await service.shutdown()
+
+
 # ============================================================================
 # TEST DATA FIXTURES
 # ============================================================================

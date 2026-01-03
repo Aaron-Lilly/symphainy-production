@@ -561,3 +561,46 @@ class PostOfficeService(SmartCityRoleBase, PostOfficeServiceProtocol):
                 "success": False,
                 "error": str(e)
             }
+    
+    # ============================================================================
+    # MCP TOOL HANDLERS (Phase 2) - For agent access via MCP Tools
+    # ============================================================================
+    
+    async def _mcp_websocket_get_endpoint(
+        self,
+        session_token: str,
+        realm: str,
+        user_context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """MCP tool handler: Get WebSocket endpoint URL."""
+        return await self.get_websocket_endpoint(session_token, realm)
+    
+    async def _mcp_websocket_publish_to_channel(
+        self,
+        channel: str,
+        message: Dict[str, Any],
+        realm: str,
+        user_context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """MCP tool handler: Publish message to agent channel."""
+        return await self.publish_to_agent_channel(channel, message, realm)
+    
+    async def _mcp_websocket_subscribe_to_channel(
+        self,
+        channel: str,
+        realm: str,
+        user_context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """MCP tool handler: Subscribe to channel."""
+        # Note: Callback handling is complex for MCP tools, this returns subscription status
+        # Actual message handling would need to be set up separately
+        return await self.subscribe_to_channel(channel, None, realm)  # Callback handled internally
+    
+    async def _mcp_websocket_send_to_connection(
+        self,
+        connection_id: str,
+        message: Dict[str, Any],
+        user_context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """MCP tool handler: Send message to connection."""
+        return await self.send_to_connection(connection_id, message)

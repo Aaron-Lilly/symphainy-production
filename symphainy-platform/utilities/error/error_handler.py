@@ -75,11 +75,17 @@ class SmartCityErrorHandler:
         self.error_log: list = []
 
         # Initialize logging (OpenTelemetry-aware if available)
-        if _LOGGING_SERVICE_AVAILABLE:
-            self.logger = get_logging_service(service_name)
-        else:
-            # Fallback to standard logging
+        # Use lazy initialization to avoid requiring ConfigAdapter at module import time
+        try:
+            if _LOGGING_SERVICE_AVAILABLE:
+                self.logger = get_logging_service(service_name)
+            else:
+                # Fallback to standard logging
+                self.logger = logging.getLogger(f"ErrorHandler-{service_name}")
+        except (ValueError, Exception) as e:
+            # If logging service requires ConfigAdapter and it's not available yet, use standard logging
             self.logger = logging.getLogger(f"ErrorHandler-{service_name}")
+            self.logger.warning(f"Using standard logging fallback (ConfigAdapter not available): {e}")
 
         # Register default error handlers
         self._register_default_handlers()
@@ -267,8 +273,22 @@ def get_error_handler(service_name: str, config=None) -> SmartCityErrorHandler:
     """Get an error handler for the specified service with optional configuration injection."""
     return SmartCityErrorHandler(service_name)
 
-# Default error handler
-default_error_handler = get_error_handler("mcp_platform")
+# Default error handler (lazy initialization to avoid requiring ConfigAdapter at module import time)
+_default_error_handler = None
+
+def get_default_error_handler() -> SmartCityErrorHandler:
+    """Get the default error handler (lazy initialization)."""
+    global _default_error_handler
+    if _default_error_handler is None:
+        _default_error_handler = get_error_handler("mcp_platform")
+    return _default_error_handler
+
+# For backward compatibility, provide default_error_handler as a property
+# But don't initialize it at module import time
+@property
+def default_error_handler():
+    """Default error handler (lazy access)."""
+    return get_default_error_handler()
 
 
 

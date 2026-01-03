@@ -97,7 +97,7 @@ async def websocket_gateway_health():
         gateway_service = get_websocket_gateway_service()
         
         is_ready = await gateway_service.is_ready()
-        connection_stats = gateway_service.get_connection_count()
+        connection_stats = await gateway_service.get_connection_count()
         
         from datetime import datetime
         uptime_seconds = 0

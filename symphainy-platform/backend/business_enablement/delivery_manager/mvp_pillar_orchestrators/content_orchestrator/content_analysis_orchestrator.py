@@ -840,97 +840,57 @@ class ContentOrchestrator(OrchestratorBase):
                     )
             
             # ========================================================================
-            # ⚠️ TEMPORARY E2E TEST FIX: Use Data Solution Orchestrator
+            # ✅ PROPER: Call Content Steward directly (Content realm service)
             # ========================================================================
-            # TODO: This is a TEMPORARY shortcut for E2E testing.
-            # In Phase 1.2, ContentAnalysisOrchestrator will be rebuilt and will
-            # properly integrate with Data Solution Orchestrator.
-            # This temporary integration allows us to test the E2E flow now.
-            # REMOVE THIS when Phase 1.2 ContentAnalysisOrchestrator rebuild is complete.
+            # ContentJourneyOrchestrator is called BY DataSolutionOrchestratorService
+            # So we should NOT call DataSolutionOrchestratorService here (that would create a circular dependency)
+            # Instead, call Content Steward directly
             # ========================================================================
-            data_solution_orchestrator = await self._get_data_solution_orchestrator_temp()
             
-            if data_solution_orchestrator:
-                # Use new Data Solution Orchestrator pattern
-                self.logger.info("⚠️ TEMPORARY: Using Data Solution Orchestrator for file upload (E2E test)")
-                
-                # Get workflow_id from session or generate new one
-                # Note: FrontendGatewayService should generate workflow_id, but we generate fallback
-                workflow_id_from_session = workflow_id if workflow_id else None
-                if not workflow_id_from_session:
-                    import uuid
-                    workflow_id_from_session = str(uuid.uuid4())
-                    self.logger.warning(f"⚠️ No workflow_id provided, generated new one: {workflow_id_from_session}")
-                
-                user_context = {
-                    "user_id": user_id,
-                    "session_id": session_id,
-                    "workflow_id": workflow_id_from_session
-                }
-                
-                upload_result = await data_solution_orchestrator.orchestrate_data_ingest(
-                    file_data=file_data,
-                    file_name=filename,
-                    file_type=file_type,
-                    user_context=user_context
-                )
-                
-                if not upload_result.get("success"):
-                    raise Exception(f"Data Solution Orchestrator upload failed: {upload_result.get('error')}")
-                
-                # Extract file_id from result
-                file_uuid = upload_result.get("file_id")
-                if not file_uuid:
-                    raise Exception("File upload succeeded but file_id not returned")
-                
-                # Update workflow_id to match what was used
-                workflow_id = workflow_id_from_session
-                
-            else:
-                # Fallback to old pattern (Content Steward direct)
-                self.logger.info("⚠️ TEMPORARY: Falling back to Content Steward direct (Data Solution Orchestrator not available)")
-                
-                # Try to use Content Steward for proper file storage (GCS + Supabase)
-                # Access via OrchestratorBase (delegates to RealmServiceBase)
-                content_steward = await self.get_content_steward_api()
-                
-                if not content_steward:
-                    raise Exception("Content Steward service not available - file upload requires infrastructure")
-                
-                # Step 3: Prepare metadata for Content Steward with proper field names
-                # Check if this is an SOP/Workflow file that should be processed in Operations Pillar
-                processing_pillar = None
-                if content_info["file_type_category"] == "sop_workflow":
-                    processing_pillar = "operations_pillar"
-                    self.logger.info(f"📋 File marked for Operations Pillar processing: {filename}")
-                
-                metadata = {
-                    "user_id": user_id,
-                    "ui_name": file_components["ui_name"],  # ✅ Correct field name
-                    "file_type": file_components["file_extension_clean"],  # ✅ Extension, not MIME
-                    "mime_type": file_type,  # ✅ MIME type separately
-                    "original_filename": file_components["original_filename"],  # ✅ Full original name
-                    "file_extension": file_components["file_extension"],  # ✅ Extension with dot
-                    "content_type": content_info["content_type"],  # ✅ For Supabase schema
-                    "file_type_category": content_info["file_type_category"],  # ✅ For processing logic
-                    "processing_pillar": processing_pillar,  # ✅ NEW: Mark for Operations Pillar if SOP/Workflow
-                    "uploaded_at": datetime.utcnow().isoformat(),
-                    "size_bytes": len(file_data)
-                }
-                
-                upload_result = await content_steward.process_upload(file_data, file_type, metadata)
-                
-                # Extract file_id from old pattern result
-                file_uuid = upload_result.get("uuid") or upload_result.get("file_id")
+            # Get Content Steward for proper file storage (GCS + Supabase)
+            # Access via OrchestratorBase (delegates to RealmServiceBase)
+            content_steward = await self.get_content_steward_api()
             
-            # Common processing for both patterns
+            if not content_steward:
+                raise Exception("Content Steward service not available - file upload requires infrastructure")
+            
+            # Prepare metadata for Content Steward with proper field names
+            # Check if this is an SOP/Workflow file that should be processed in Operations Pillar
+            processing_pillar = None
+            if content_info["file_type_category"] == "sop_workflow":
+                processing_pillar = "operations_pillar"
+                self.logger.info(f"📋 File marked for Operations Pillar processing: {filename}")
+            
+            metadata = {
+                "user_id": user_id,
+                "ui_name": file_components["ui_name"],  # ✅ Correct field name
+                "file_type": file_components["file_extension_clean"],  # ✅ Extension, not MIME
+                "mime_type": file_type,  # ✅ MIME type separately
+                "original_filename": file_components["original_filename"],  # ✅ Full original name
+                "file_extension": file_components["file_extension"],  # ✅ Extension with dot
+                "content_type": content_info["content_type"],  # ✅ For Supabase schema
+                "file_type_category": content_info["file_type_category"],  # ✅ For processing logic
+                "processing_pillar": processing_pillar,  # ✅ Mark for Operations Pillar if SOP/Workflow
+                "uploaded_at": datetime.utcnow().isoformat(),
+                "size_bytes": len(file_data)
+            }
+            
+            # Prepare user_context for Content Steward
+            user_context = {
+                "user_id": user_id,
+                "session_id": session_id,
+                "workflow_id": workflow_id
+            }
+            
+            upload_result = await content_steward.process_upload(file_data, file_type, metadata, user_context)
+            
+            # Extract file_id from result
+            file_uuid = upload_result.get("uuid") or upload_result.get("file_id")
+            
             if upload_result.get("success") or upload_result.get("status") == "success" or file_uuid:
-                if data_solution_orchestrator:
-                    self.logger.info(f"✅ File uploaded via Data Solution Orchestrator (E2E test): {filename}")
-                else:
-                    self.logger.info(f"✅ File uploaded via Content Steward (GCS + Supabase): {filename}")
+                self.logger.info(f"✅ File uploaded via Content Steward (GCS + Supabase): {filename}")
                 
-                # Ensure we have file_uuid (already extracted above, but double-check)
+                # Ensure we have file_uuid
                 if not file_uuid:
                     file_uuid = upload_result.get("uuid") or upload_result.get("file_id")
                 
@@ -938,6 +898,9 @@ class ContentOrchestrator(OrchestratorBase):
                     raise Exception("File upload failed: no UUID returned")
                 
                 # Update workflow status to completed
+                # Session tracking handled via Traffic Cop (Smart City service)
+                # Workflow tracking handled via Conductor (Smart City service)
+                # Workflow tracking is handled by DataSolutionOrchestrator via platform correlation
                 if session_id and workflow_id and hasattr(self.delivery_manager, 'session_manager') and self.delivery_manager.session_manager:
                     if hasattr(self.delivery_manager, 'track_orchestrator_workflow'):
                         await self.delivery_manager.track_orchestrator_workflow(
@@ -951,43 +914,24 @@ class ContentOrchestrator(OrchestratorBase):
                             }
                         )
                 
-                # Step 5: Return with proper field names
-                # Build return dict - handle both Data Solution Orchestrator and old pattern
+                # Return with proper field names
                 return_dict = {
                     "success": True,
                     "file_id": file_uuid,
                     "uuid": file_uuid,
                     "workflow_id": workflow_id,  # Return workflow_id for frontend
-                    "orchestrator": "ContentAnalysisOrchestrator"
+                    "orchestrator": "ContentAnalysisOrchestrator",
+                    "ui_name": file_components["ui_name"],
+                    "original_filename": file_components["original_filename"],
+                    "file_extension": file_components["file_extension"],
+                    "file_type": file_components["file_extension_clean"],
+                    "mime_type": file_type,
+                    "content_type": content_info["content_type"],
+                    "file_type_category": content_info["file_type_category"],
+                    "processing_pillar": processing_pillar,
+                    "size": len(file_data),
+                    "message": "File uploaded successfully" + (f" (will be processed in {processing_pillar})" if processing_pillar else "")
                 }
-                
-                # Add metadata fields (available in both patterns, but may need parsing)
-                if data_solution_orchestrator:
-                    # Data Solution Orchestrator pattern - extract from upload_result if available
-                    return_dict.update({
-                        "ui_name": filename,  # Use filename as fallback
-                        "original_filename": filename,
-                        "file_type": file_components.get("file_extension_clean", ""),
-                        "mime_type": file_type,
-                        "size": len(file_data),
-                        "message": "File uploaded successfully via Data Solution Orchestrator (E2E test)",
-                        "mode": "data_solution_orchestrator"
-                    })
-                else:
-                    # Old pattern - use parsed components
-                    return_dict.update({
-                        "ui_name": file_components["ui_name"],
-                        "original_filename": file_components["original_filename"],
-                        "file_extension": file_components["file_extension"],
-                        "file_type": file_components["file_extension_clean"],
-                        "mime_type": file_type,
-                        "content_type": content_info["content_type"],
-                        "file_type_category": content_info["file_type_category"],
-                        "processing_pillar": processing_pillar,
-                        "size": len(file_data),
-                        "message": "File uploaded successfully" + (f" (will be processed in {processing_pillar})" if processing_pillar else ""),
-                        "mode": "gcs_supabase"
-                    })
                 
                 return return_dict
             else:
@@ -1047,11 +991,9 @@ class ContentOrchestrator(OrchestratorBase):
         """
         Process file (parsing + metadata extraction) - Frontend Gateway API compatibility.
         
-        ⚠️ TEMPORARY E2E TEST FIX: Uses Data Solution Orchestrator if available.
-        TODO: This is a TEMPORARY shortcut for E2E testing.
-        In Phase 1.2, ContentAnalysisOrchestrator will be rebuilt and will
-        properly integrate with Data Solution Orchestrator.
-        REMOVE THIS when Phase 1.2 ContentAnalysisOrchestrator rebuild is complete.
+        ✅ ContentJourneyOrchestrator is called BY DataSolutionOrchestratorService.
+        So we should NOT call DataSolutionOrchestratorService here (that would create a circular dependency).
+        Instead, call FileParserService and other Content realm services directly.
         
         Args:
             file_id: File UUID
@@ -1066,34 +1008,41 @@ class ContentOrchestrator(OrchestratorBase):
             self.logger.info(f"⚙️ Processing file: {file_id}")
             
             # ========================================================================
-            # DATA SOLUTION ORCHESTRATOR - ONLY WAY TO ACCESS DATA
+            # Call FileParserService directly (Content realm service)
             # ========================================================================
-            # NO FALLBACKS - Hard fail if Data Solution Orchestrator is not available
+            # ContentJourneyOrchestrator is called BY DataSolutionOrchestratorService
+            # So we should NOT call DataSolutionOrchestratorService here (that would create a circular dependency)
+            # Instead, call FileParserService directly
             # ========================================================================
-            data_solution_orchestrator = await self._get_data_solution_orchestrator()
             
-            import uuid
-            user_context = {
-                "user_id": user_id,
-                "workflow_id": str(uuid.uuid4())  # Generate workflow_id for parsing
-            }
+            # Get FileParserService (Content realm service)
+            file_parser = await self._get_file_parser_service()
+            if not file_parser:
+                return {
+                    "success": False,
+                    "file_id": file_id,
+                    "error": "FileParserService not available - parsing requires FileParserService"
+                }
             
             # Prepare parse options
+            # FileParserService will handle copybook_file_id loading (best practice: service owns its concerns)
             parse_options = processing_options or {}
             if copybook_file_id:
                 parse_options["copybook_file_id"] = copybook_file_id
             
-            parse_result = await data_solution_orchestrator.orchestrate_data_parse(
+            # Parse file via FileParserService
+            # FileParserService will load copybook content from copybook_file_id if present
+            parse_result = await file_parser.parse_file(
                 file_id=file_id,
                 parse_options=parse_options,
-                user_context=user_context
+                user_context={"user_id": user_id}  # Minimal user_context for parsing
             )
             
             if not parse_result.get("success"):
                 return {
                     "success": False,
                     "file_id": file_id,
-                    "error": parse_result.get("error", "Parsing failed"),
+                    "error": parse_result.get("error", "File parsing failed"),
                     "parse_result": parse_result
                 }
             
@@ -1107,8 +1056,7 @@ class ContentOrchestrator(OrchestratorBase):
                 "parse_result": parse_result,
                 "file_details": file_details.get("file", {}),
                 "copybook_file_id": copybook_file_id,
-                "workflow_id": user_context.get("workflow_id"),
-                "message": "Parsing completed successfully via Data Solution Orchestrator"
+                "message": "Parsing completed successfully via FileParserService"
             }
             
             return result

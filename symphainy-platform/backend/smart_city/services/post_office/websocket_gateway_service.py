@@ -20,6 +20,21 @@ from collections import defaultdict
 from fastapi import WebSocket, WebSocketDisconnect
 from bases.smart_city_role_base import SmartCityRoleBase
 from .connection_registry import ConnectionRegistry
+from .fanout_manager import FanOutManager
+from .backpressure_manager import BackpressureManager
+from .session_eviction_manager import SessionEvictionManager
+
+# OpenTelemetry imports (optional)
+try:
+    from opentelemetry import trace, metrics
+    from opentelemetry.trace import Status, StatusCode
+    OTEL_AVAILABLE = True
+except ImportError:
+    trace = None
+    metrics = None
+    Status = None
+    StatusCode = None
+    OTEL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +73,35 @@ class WebSocketGatewayService(SmartCityRoleBase):
         self.local_connections: Dict[str, WebSocket] = {}
         self.connection_registry: Optional[ConnectionRegistry] = None  # Redis-backed registry
         
+        # Phase 3: Production Hardening Components
+        self.fanout_manager: Optional[FanOutManager] = None
+        self.backpressure_manager: Optional[BackpressureManager] = None
+        self.eviction_manager: Optional[SessionEvictionManager] = None
+        
+        # OpenTelemetry (Phase 3)
+        self.tracer = None
+        self.meter = None
+        if OTEL_AVAILABLE:
+            try:
+                self.tracer = trace.get_tracer(__name__, "1.0.0")
+                self.meter = metrics.get_meter(__name__, "1.0.0")
+                
+                # Create metrics
+                self.metrics = {
+                    "connections_active": self.meter.create_up_down_counter("websocket.connections.active"),
+                    "connections_total": self.meter.create_counter("websocket.connections.total"),
+                    "messages_sent": self.meter.create_counter("websocket.messages.sent"),
+                    "messages_received": self.meter.create_counter("websocket.messages.received"),
+                    "errors": self.meter.create_counter("websocket.errors"),
+                    "message_latency": self.meter.create_histogram("websocket.message.latency_ms")
+                }
+            except Exception as e:
+                if self.logger:
+                    self.logger.warning(f"⚠️ OpenTelemetry not available: {e}")
+                self.metrics = {}
+        else:
+            self.metrics = {}
+        
         # Connection tracking (in-memory for limits, Redis for state)
         self.connection_limits = {
             "max_per_user": 5,
@@ -91,6 +135,30 @@ class WebSocketGatewayService(SmartCityRoleBase):
             
             # Initialize Redis-backed connection registry
             self.connection_registry = ConnectionRegistry(self.messaging_abstraction)
+            
+            # Phase 3: Initialize production hardening components
+            self.fanout_manager = FanOutManager(
+                messaging_abstraction=self.messaging_abstraction,
+                connection_registry=self.connection_registry
+            )
+            
+            self.backpressure_manager = BackpressureManager(
+                messaging_abstraction=self.messaging_abstraction,
+                max_queue_size=1000
+            )
+            
+            self.eviction_manager = SessionEvictionManager(
+                connection_registry=self.connection_registry,
+                heartbeat_interval=30,
+                max_idle_time=300,  # 5 minutes
+                eviction_check_interval=60  # 1 minute
+            )
+            
+            # Start eviction monitor
+            await self.eviction_manager.start_eviction_monitor(self.local_connections)
+            
+            if self.logger:
+                self.logger.info("✅ Phase 3 production hardening components initialized")
             
             # Check readiness
             self.is_ready_flag = await self.is_ready()
@@ -152,6 +220,14 @@ class WebSocketGatewayService(SmartCityRoleBase):
         """
         connection_id = None
         
+        # Phase 3: OpenTelemetry tracing
+        span = None
+        if self.tracer:
+            span = self.tracer.start_span("websocket.connection")
+            span.set_attribute("gateway_instance", self.instance_id)
+            if session_token:
+                span.set_attribute("session_token", session_token[:20] + "...")  # Partial token for privacy
+        
         try:
             # 1. Accept connection immediately (required by FastAPI/Starlette)
             await websocket.accept()
@@ -164,16 +240,72 @@ class WebSocketGatewayService(SmartCityRoleBase):
             
             if not connection_id:
                 # Registration failed, connection already closed
+                if span:
+                    span.set_status(Status(StatusCode.ERROR, "Connection registration failed"))
+                    span.end()
                 return
+            
+            if span:
+                span.set_attribute("connection_id", connection_id)
+            
+            # Phase 3: Start heartbeat monitor
+            if self.eviction_manager:
+                await self.eviction_manager.start_heartbeat_monitor(
+                    connection_id,
+                    websocket,
+                    self.local_connections
+                )
+            
+            # Phase 3: Record connection metric
+            if self.metrics.get("connections_active"):
+                self.metrics["connections_active"].add(1)
+            if self.metrics.get("connections_total"):
+                self.metrics["connections_total"].add(1)
             
             # 3. Send welcome message
             await self._send_welcome_message(websocket, connection_id)
             
-            # 4. Message loop
+            # 4. Message loop with tracing
             async for message in websocket.iter_text():
-                await self._handle_incoming_message(connection_id, message)
+                msg_span = None
+                if self.tracer:
+                    msg_span = self.tracer.start_span("websocket.message")
+                    msg_span.set_attribute("connection_id", connection_id)
+                
+                start_time = datetime.utcnow()
+                try:
+                    await self._handle_incoming_message(connection_id, message)
+                    
+                    # Phase 3: Record message metric
+                    if self.metrics.get("messages_received"):
+                        self.metrics["messages_received"].add(1)
+                    
+                    # Phase 3: Record latency
+                    latency_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+                    if self.metrics.get("message_latency"):
+                        self.metrics["message_latency"].record(latency_ms)
+                    
+                    if msg_span:
+                        msg_span.set_attribute("latency_ms", latency_ms)
+                        msg_span.end()
+                        
+                except Exception as e:
+                    if self.metrics.get("errors"):
+                        self.metrics["errors"].add(1)
+                    if msg_span:
+                        msg_span.record_exception(e)
+                        msg_span.set_status(Status(StatusCode.ERROR, str(e)))
+                        msg_span.end()
+                    raise
                 
         except WebSocketDisconnect:
+            if span:
+                span.set_attribute("disconnect_reason", "client_disconnect")
+                span.end()
+            
+            # Phase 3: Record connection metric
+            if self.metrics.get("connections_active"):
+                self.metrics["connections_active"].add(-1)
             if self.logger:
                 self.logger.info(f"🔌 WebSocket disconnected: {connection_id}")
             await self._handle_disconnect(connection_id)
@@ -319,9 +451,6 @@ class WebSocketGatewayService(SmartCityRoleBase):
     async def _route_to_channel(self, connection_id: str, channel: str, message: Dict[str, Any]):
         """Route message to appropriate Redis channel."""
         try:
-            # Map channel to Redis channel name
-            redis_channel = f"websocket:{channel}"
-            
             # Add connection metadata to message
             message_with_metadata = {
                 "connection_id": connection_id,
@@ -331,18 +460,37 @@ class WebSocketGatewayService(SmartCityRoleBase):
                 "gateway_instance": self.instance_id
             }
             
-            # Publish to Redis channel (direct abstraction access)
-            if self.messaging_abstraction:
-                if hasattr(self.messaging_abstraction, 'publish'):
-                    await self.messaging_abstraction.publish(
-                        redis_channel,
-                        json.dumps(message_with_metadata)
-                    )
-                elif hasattr(self.messaging_abstraction, 'send_message'):
-                    await self.messaging_abstraction.send_message(
-                        redis_channel,
-                        message_with_metadata
-                    )
+            # Phase 3: Use backpressure manager for publishing
+            if self.backpressure_manager:
+                result = await self.backpressure_manager.publish_with_backpressure(
+                    channel=channel,
+                    message=message_with_metadata
+                )
+                
+                if result.get("status") == "rejected":
+                    if self.logger:
+                        self.logger.warning(f"⚠️ Message rejected for {channel} (backpressure)")
+                    # Send error to client
+                    await self._send_error(connection_id, "Message rejected: system overloaded")
+                    return
+                
+                if result.get("queued"):
+                    if self.logger:
+                        self.logger.debug(f"📦 Message queued for {channel} (backpressure)")
+            else:
+                # Fallback: Direct publish
+                redis_channel = f"websocket:{channel}"
+                if self.messaging_abstraction:
+                    if hasattr(self.messaging_abstraction, 'publish'):
+                        await self.messaging_abstraction.publish(
+                            redis_channel,
+                            json.dumps(message_with_metadata)
+                        )
+                    elif hasattr(self.messaging_abstraction, 'send_message'):
+                        await self.messaging_abstraction.send_message(
+                            redis_channel,
+                            message_with_metadata
+                        )
             
             # Track channel subscription in Redis
             if self.connection_registry:
@@ -350,12 +498,17 @@ class WebSocketGatewayService(SmartCityRoleBase):
             
             if self.logger:
                 self.logger.debug(
-                    f"📤 Routed message from {connection_id} to channel {redis_channel}"
+                    f"📤 Routed message from {connection_id} to channel {channel}"
                 )
                 
         except Exception as e:
             if self.logger:
                 self.logger.error(f"❌ Failed to route message to channel {channel}: {e}")
+            
+            # Phase 3: Record error metric
+            if self.metrics.get("errors"):
+                self.metrics["errors"].add(1)
+            
             raise
     
     async def _send_error(self, connection_id: str, error_message: str):

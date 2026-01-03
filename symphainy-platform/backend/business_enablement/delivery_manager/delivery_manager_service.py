@@ -83,15 +83,10 @@ class DeliveryManagerService(ManagerServiceBase, ManagerServiceProtocol):
         }
         
         # ========================================================================
-        # ⚠️ TEMPORARY E2E TEST FIX: Data Solution Orchestrator Registration
+        # ✅ REMOVED: Data Solution Orchestrator is in Solution realm and discovered via Curator
+        # ContentJourneyOrchestrator no longer needs temporary registration
+        # DataSolutionOrchestratorService discovers ContentJourneyOrchestrator via Curator
         # ========================================================================
-        # TODO: This is a TEMPORARY shortcut for E2E testing.
-        # In Phase 1.2, ContentAnalysisOrchestrator will be rebuilt and will
-        # properly integrate with Data Solution Orchestrator.
-        # This temporary registration allows us to test the E2E flow now.
-        # REMOVE THIS when Phase 1.2 ContentAnalysisOrchestrator rebuild is complete.
-        # ========================================================================
-        self.data_solution_orchestrator: Optional[Any] = None
         
         # Initialize micro-modules
         self.initialization_module = Initialization(self)
