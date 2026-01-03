@@ -89,6 +89,194 @@ class DataSolutionOrchestratorService(OrchestratorBase):
         self.post_office = None
         self.nurse = None
     
+    # ============================================================================
+    # UNIFIED SOA API → MCP TOOL PATTERN (Phase 3.2.5)
+    # ============================================================================
+    
+    def _define_soa_api_handlers(self) -> Dict[str, Any]:
+        """
+        Define Data Solution Orchestrator SOA APIs.
+        
+        UNIFIED PATTERN: MCP Server automatically registers these as MCP Tools.
+        
+        Returns:
+            Dict of SOA API definitions with handlers, input schemas, and descriptions
+        """
+        return {
+            "orchestrate_data_ingest": {
+                "handler": self.orchestrate_data_ingest,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_data": {
+                            "type": "string",
+                            "format": "binary",
+                            "description": "File data as bytes"
+                        },
+                        "file_name": {
+                            "type": "string",
+                            "description": "Name of the file"
+                        },
+                        "file_type": {
+                            "type": "string",
+                            "description": "MIME type or file extension"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id)"
+                        }
+                    },
+                    "required": ["file_data", "file_name", "file_type"]
+                },
+                "description": "Orchestrate data ingestion with platform correlation and optional Saga"
+            },
+            "orchestrate_data_parse": {
+                "handler": self.orchestrate_data_parse,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_id": {
+                            "type": "string",
+                            "description": "File identifier from ingestion"
+                        },
+                        "parse_options": {
+                            "type": "object",
+                            "description": "Optional parsing options",
+                            "default": None
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id)"
+                        },
+                        "workflow_id": {
+                            "type": "string",
+                            "description": "Optional workflow_id (if not in user_context)"
+                        }
+                    },
+                    "required": ["file_id"]
+                },
+                "description": "Orchestrate data parsing with platform correlation"
+            },
+            "orchestrate_data_embed": {
+                "handler": self.orchestrate_data_embed,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_id": {
+                            "type": "string",
+                            "description": "File identifier"
+                        },
+                        "parsed_file_id": {
+                            "type": "string",
+                            "description": "Parsed file identifier"
+                        },
+                        "content_metadata": {
+                            "type": "object",
+                            "description": "Content metadata from parsing"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id)"
+                        },
+                        "workflow_id": {
+                            "type": "string",
+                            "description": "Optional workflow_id (if not in user_context)"
+                        }
+                    },
+                    "required": ["file_id", "parsed_file_id", "content_metadata"]
+                },
+                "description": "Orchestrate data embedding with platform correlation"
+            },
+            "orchestrate_data_expose": {
+                "handler": self.orchestrate_data_expose,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_id": {
+                            "type": "string",
+                            "description": "File identifier"
+                        },
+                        "parsed_file_id": {
+                            "type": "string",
+                            "description": "Optional parsed file identifier (if not provided, gets first one)"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context"
+                        }
+                    },
+                    "required": ["file_id"]
+                },
+                "description": "Orchestrate data exposure with platform correlation"
+            },
+            "orchestrate_data_mash": {
+                "handler": self.orchestrate_data_mash,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "client_data_query": {
+                            "type": "object",
+                            "description": "Query for client data",
+                            "default": None
+                        },
+                        "semantic_data_query": {
+                            "type": "object",
+                            "description": "Query for semantic data (Future)",
+                            "default": None
+                        },
+                        "platform_data_query": {
+                            "type": "object",
+                            "description": "Query for platform data (Future)",
+                            "default": None
+                        },
+                        "insights_query": {
+                            "type": "object",
+                            "description": "Query for insights",
+                            "default": None
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "User context with correlation IDs"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Orchestrate data mash - virtual composition across client, semantic, platform data, and insights"
+            },
+            "orchestrate_content_pillar_summary": {
+                "handler": self.orchestrate_content_pillar_summary,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session identifier"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes user_id, tenant_id)"
+                        }
+                    },
+                    "required": ["session_id"]
+                },
+                "description": "Orchestrate Content Pillar summary compilation (data mash preview)"
+            }
+        }
+    
+    async def _initialize_mcp_server(self):
+        """
+        Initialize Solution Realm MCP Server (unified pattern).
+        
+        MCP Server automatically registers tools from _define_soa_api_handlers().
+        """
+        from .mcp_server.solution_mcp_server import SolutionMCPServer
+        
+        self.mcp_server = SolutionMCPServer(
+            orchestrator=self,
+            di_container=self.di_container
+        )
+        await self.mcp_server.initialize()
+    
     async def initialize(self) -> bool:
         """
         Initialize Data Solution Orchestrator Service.
