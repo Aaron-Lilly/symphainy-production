@@ -459,8 +459,9 @@ class TestWebSocketGatewayIntegration:
                 # No response is OK - agent may not be subscribed
                 pass
             
-            # 4. Verify connection is still open
-            assert websocket.open, "Connection closed unexpectedly"
+            # 4. Verify connection is still open (websockets library uses .state property)
+            from websockets.protocol import State
+            assert websocket.state == State.OPEN, f"Connection closed unexpectedly (state: {websocket.state})"
             
             # 5. Send another message to different channel
             message2 = {
@@ -474,8 +475,9 @@ class TestWebSocketGatewayIntegration:
             await websocket.send(json.dumps(message2))
             await asyncio.sleep(0.5)
             
-            # 6. Connection should still be open
-            assert websocket.open, "Connection closed after second message"
+            # 6. Connection should still be open (websockets library uses .state property)
+            from websockets.protocol import State
+            assert websocket.state == State.OPEN, f"Connection closed after second message (state: {websocket.state})"
         
         # Verify we received at least the welcome message
         assert len(messages) >= 1, "No messages received"
@@ -502,9 +504,10 @@ class TestWebSocketGatewayIntegration:
                 
                 await asyncio.sleep(0.2)
             
-            # All connections should be open
+            # All connections should be open (websockets library uses .state property)
+            from websockets.protocol import State
             for i, ws in enumerate(connections):
-                assert ws.open, f"Connection {i} closed unexpectedly"
+                assert ws.state == State.OPEN, f"Connection {i} closed unexpectedly (state: {ws.state})"
         
         finally:
             # Cleanup

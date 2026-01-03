@@ -64,11 +64,8 @@ class DataMappingAgent:
                 return None
         return self._embedding_service
     
-    async def _get_content_steward(self):
-        """Get Content Steward for file access."""
-        if self._content_steward is None:
-            self._content_steward = await self.orchestrator.get_smart_city_service("ContentStewardService")
-        return self._content_steward
+    # ❌ REMOVED: _get_content_steward() - Anti-pattern (direct service access)
+    # Use execute_mcp_tool("content_get_parsed_file", ...) instead (unified pattern)
     
     async def _get_llm_composition(self):
         """Get LLM Composition Service."""
@@ -108,22 +105,21 @@ class DataMappingAgent:
         try:
             self.logger.info(f"📋 Extracting source schema (mapping_type: {mapping_type})")
             
-            content_steward = await self._get_content_steward()
-            if not content_steward:
+            # Use cross-realm MCP tool access (unified pattern)
+            # DataMappingAgent is in Insights realm but needs Content realm capabilities
+            parsed_file_result = await self.execute_mcp_tool(
+                "content_get_parsed_file",  # Cross-realm: Content realm MCP tool
+                {"parsed_file_id": source_file_id}
+            )
+            
+            if not parsed_file_result.get("success"):
                 return {
                     "schema_type": mapping_type,
                     "fields": [],
-                    "error": "Content Steward not available"
+                    "error": parsed_file_result.get("error", "Failed to get parsed file")
                 }
             
-            # Get parsed file
-            parsed_file = await content_steward.get_parsed_file(source_file_id)
-            if not parsed_file:
-                return {
-                    "schema_type": mapping_type,
-                    "fields": [],
-                    "error": "Parsed file not found"
-                }
+            parsed_file = parsed_file_result
             
             if mapping_type == "unstructured_to_structured":
                 # Use LLM to infer field schema from unstructured content
@@ -282,22 +278,21 @@ Focus on fields that would be useful for data mapping (dates, names, numbers, id
         try:
             self.logger.info(f"📋 Extracting target schema")
             
-            content_steward = await self._get_content_steward()
-            if not content_steward:
+            # Use cross-realm MCP tool access (unified pattern)
+            # DataMappingAgent is in Insights realm but needs Content realm capabilities
+            parsed_file_result = await self.execute_mcp_tool(
+                "content_get_parsed_file",  # Cross-realm: Content realm MCP tool
+                {"parsed_file_id": target_file_id}
+            )
+            
+            if not parsed_file_result.get("success"):
                 return {
                     "schema_type": "structured",
                     "fields": [],
-                    "error": "Content Steward not available"
+                    "error": parsed_file_result.get("error", "Failed to get parsed file")
                 }
             
-            # Get parsed file
-            parsed_file = await content_steward.get_parsed_file(target_file_id)
-            if not parsed_file:
-                return {
-                    "schema_type": "structured",
-                    "fields": [],
-                    "error": "Parsed file not found"
-                }
+            parsed_file = parsed_file_result
             
             # Extract schema from structured target
             parsed_data = parsed_file.get("parsed_data") or parsed_file.get("data", {})
