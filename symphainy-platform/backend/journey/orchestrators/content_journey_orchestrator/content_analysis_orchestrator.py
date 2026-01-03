@@ -464,8 +464,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                         }
                     }
                 ],
-                soa_apis=["handle_content_upload", "parse_file", "analyze_document", "extract_entities"],
-                mcp_tools=["handle_content_upload_tool", "parse_file_tool", "analyze_document_tool"]
+                soa_apis=soa_api_names,
+                mcp_tools=mcp_tool_names
             )
             
             # Record health metric

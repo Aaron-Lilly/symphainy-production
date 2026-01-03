@@ -81,17 +81,23 @@ class ContentMCPServer(MCPServerBase):
                     tool_name = f"content_{api_name}"
                     
                     # Create async wrapper that calls the handler
-                    async def tool_handler(parameters: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None):
-                        """MCP tool handler that wraps SOA API handler."""
-                        # Call orchestrator handler with parameters
-                        # Handler should accept **kwargs or specific parameters
-                        if callable(handler):
-                            # Try calling with parameters unpacked
-                            if user_context:
-                                parameters["user_context"] = user_context
-                            return await handler(**parameters)
-                        else:
-                            raise ValueError(f"Handler for '{api_name}' is not callable")
+                    # IMPORTANT: Capture api_name and handler in closure to avoid Python closure bug
+                    def create_tool_handler(api_name_inner, handler_inner):
+                        """Factory function to create tool handler with proper closure."""
+                        async def tool_handler(parameters: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None):
+                            """MCP tool handler that wraps SOA API handler."""
+                            # Call orchestrator handler with parameters
+                            # Handler should accept **kwargs or specific parameters
+                            if callable(handler_inner):
+                                # Try calling with parameters unpacked
+                                if user_context:
+                                    parameters["user_context"] = user_context
+                                return await handler_inner(**parameters)
+                            else:
+                                raise ValueError(f"Handler for '{api_name_inner}' is not callable")
+                        return tool_handler
+                    
+                    tool_handler = create_tool_handler(api_name, handler)
                     
                     # Get input schema from SOA API definition
                     input_schema = api_def.get("input_schema", {})
