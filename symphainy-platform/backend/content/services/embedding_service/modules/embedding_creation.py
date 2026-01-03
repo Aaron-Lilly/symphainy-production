@@ -146,7 +146,9 @@ What does this column represent? Return ONLY a concise description (1-5 words)."
             
             try:
                 # ✅ Use get_parsed_file() which looks up metadata and retrieves the actual GCS file
-                # parsed_file_id is a string identifier (e.g., "parsed_xxx"), not the GCS file UUID
+                # ✅ CLARIFIED: parsed_file_id IS the GCS file UUID (stored in parsed_data_files.parsed_file_id)
+                # The parsed file is stored in GCS with this UUID, and metadata is stored in parsed_data_files table
+                # This UUID is returned from store_parsed_file() and used consistently throughout the platform
                 parsed_file_result = await self.service.content_steward.get_parsed_file(parsed_file_id)
                 if not parsed_file_result:
                     raise ValueError(f"Parsed file not found: {parsed_file_id}. File must be parsed and saved before embeddings can be created.")
