@@ -10,6 +10,9 @@ from datetime import datetime, timedelta
 from backend.smart_city.protocols.traffic_cop_service_protocol import (
     SessionRequest, SessionResponse, SessionStatus
 )
+from foundations.public_works_foundation.abstraction_contracts.session_protocol import (
+    SessionContext, SessionType, SecurityLevel
+)
 
 
 class SessionManagement:
@@ -46,16 +49,64 @@ class SessionManagement:
             self.service.traffic_metrics["active_sessions"] += 1
             
             # Use Public Works session abstraction
-            session_result = await self.service.session_abstraction.create_session(
-                session_id=request.session_id,
-                user_id=request.user_id,
-                session_data={
+            # Create SessionContext with session data in metadata
+            session_context = SessionContext(
+                service_id="traffic_cop",
+                agent_id=None,
+                tenant_id=request.context.get("tenant_id") if isinstance(request.context, dict) else None,
+                environment="production",
+                region="us-west-2",
+                metadata={
+                    "session_id": request.session_id,
+                    "user_id": request.user_id,
                     "session_type": request.session_type,
                     "context": request.context,
                     "created_at": datetime.utcnow().isoformat(),
                     "ttl_seconds": request.ttl_seconds
                 }
             )
+            
+            # Map request.session_type to valid SessionType enum
+            # Valid SessionType values: USER, AGENT, SERVICE, API, WEB, MOBILE
+            session_type_map = {
+                "websocket_test": SessionType.WEB,
+                "user": SessionType.USER,
+                "agent": SessionType.AGENT,
+                "service": SessionType.SERVICE,
+                "api": SessionType.API,
+                "web": SessionType.WEB,
+                "mobile": SessionType.MOBILE
+            }
+            mapped_session_type = session_type_map.get(request.session_type, SessionType.USER)
+            
+            # Session data for the adapter (extracted from context or provided separately)
+            session_data = {
+                "user_id": request.user_id,
+                "session_id": request.session_id,
+                "session_type": mapped_session_type.value,  # Use enum value
+                "context": request.context,
+                "created_at": datetime.utcnow().isoformat(),
+                "ttl_seconds": request.ttl_seconds,
+                "metadata": {
+                    "session_type": request.session_type,  # Keep original for reference
+                    "mapped_session_type": mapped_session_type.value,
+                    "context": request.context,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "ttl_seconds": request.ttl_seconds
+                }
+            }
+            
+            # Call abstraction - try with both context and session_data (matching Security Guard pattern)
+            try:
+                session_result = await self.service.session_abstraction.create_session(
+                    context=session_context,
+                    session_data=session_data
+                )
+            except TypeError:
+                # Fallback: if abstraction doesn't accept session_data, extract from context metadata
+                session_result = await self.service.session_abstraction.create_session(
+                    context=session_context
+                )
             
             if session_result:
                 # Record health metric

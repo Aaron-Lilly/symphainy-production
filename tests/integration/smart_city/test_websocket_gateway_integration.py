@@ -137,8 +137,9 @@ class TestWebSocketGatewayIntegration:
         # For now, we just verify the message was accepted
         await asyncio.sleep(0.5)  # Give time for processing
         
-        # Connection should still be open
-        assert websocket.open, "WebSocket connection closed unexpectedly"
+        # Connection should still be open (websockets library uses .state property)
+        from websockets.protocol import State
+        assert websocket.state == State.OPEN, f"WebSocket connection closed unexpectedly (state: {websocket.state})"
     
     @pytest.mark.asyncio
     async def test_websocket_channel_routing_pillar(self, websocket_client):
@@ -164,8 +165,9 @@ class TestWebSocketGatewayIntegration:
             await websocket.send(json.dumps(message))
             await asyncio.sleep(0.2)  # Give time for processing
             
-            # Connection should still be open
-            assert websocket.open, f"WebSocket connection closed for {channel}"
+            # Connection should still be open (websockets library uses .state property)
+            from websockets.protocol import State
+            assert websocket.state == State.OPEN, f"WebSocket connection closed for {channel} (state: {websocket.state})"
     
     @pytest.mark.asyncio
     async def test_websocket_invalid_message_format(self, websocket_client):

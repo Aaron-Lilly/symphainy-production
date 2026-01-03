@@ -419,7 +419,8 @@ class BusinessSpecialistAgentBase(AgentBase):
         self,
         tool_name: str,
         parameters: Dict[str, Any],
-        user_context: Optional[Dict[str, Any]] = None
+        user_context: Optional[Dict[str, Any]] = None,
+        realm: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute MCP tool via orchestrator's MCP server.
@@ -432,11 +433,14 @@ class BusinessSpecialistAgentBase(AgentBase):
         - MCP Tools are exposed by MCP Servers (one per realm)
         - MCP Servers wrap SOA APIs as MCP Tools
         - Orchestrators initialize MCP Servers and set themselves on agents
+        - Cross-realm access: Tool names can include realm prefix (e.g., "content_get_parsed_file")
         
         Args:
-            tool_name: Name of MCP tool to execute (e.g., "content_upload_file")
+            tool_name: Name of MCP tool to execute (e.g., "content_upload_file" or "upload_file")
             parameters: Tool parameters (dict)
             user_context: Optional user context dict with user_id, tenant_id, permissions, etc.
+            realm: Optional realm name to route to (e.g., "content", "insights"). 
+                   If not provided, extracted from tool_name prefix if present.
         
         Returns:
             Tool execution result (dict)
@@ -446,18 +450,41 @@ class BusinessSpecialistAgentBase(AgentBase):
         
         Example:
             ```python
+            # Same realm (default)
             result = await self.execute_mcp_tool(
-                "content_upload_file",
-                {
-                    "file_data": file_data,
-                    "filename": filename,
-                    "file_type": file_type
-                },
-                user_context=user_context
+                "upload_file",
+                {"file_data": file_data, "filename": filename}
+            )
+            
+            # Cross-realm via tool name prefix
+            result = await self.execute_mcp_tool(
+                "content_get_parsed_file",
+                {"parsed_file_id": file_id}
+            )
+            
+            # Cross-realm via explicit realm parameter
+            result = await self.execute_mcp_tool(
+                "get_parsed_file",
+                {"parsed_file_id": file_id},
+                realm="content"
             )
             ```
         """
-        # Get orchestrator (set by orchestrator during initialization)
+        # Extract realm from tool name if present (e.g., "content_get_parsed_file" -> realm="content")
+        if not realm and "_" in tool_name:
+            potential_realm = tool_name.split("_")[0]
+            # Known realms
+            known_realms = ["content", "insights", "solution", "journey", "business_enablement"]
+            if potential_realm in known_realms:
+                realm = potential_realm
+                # Remove realm prefix from tool_name
+                tool_name = tool_name[len(f"{realm}_"):]
+        
+        # If realm specified (via parameter or tool name prefix), route to that realm
+        if realm:
+            return await self._execute_cross_realm_tool(realm, tool_name, parameters, user_context)
+        
+        # Default: Use agent's own orchestrator
         orchestrator = getattr(self, 'orchestrator', None)
         if not orchestrator:
             raise ValueError(
@@ -483,6 +510,131 @@ class BusinessSpecialistAgentBase(AgentBase):
             parameters,
             user_context=final_user_context
         )
+    
+    async def _execute_cross_realm_tool(
+        self,
+        realm: str,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute MCP tool from another realm.
+        
+        Discovers the orchestrator for the specified realm and routes the tool call.
+        
+        Args:
+            realm: Realm name (e.g., "content", "insights")
+            tool_name: Tool name (without realm prefix)
+            parameters: Tool parameters
+            user_context: Optional user context
+        
+        Returns:
+            Tool execution result
+        
+        Raises:
+            ValueError: If realm orchestrator not found or MCP server not available
+        """
+        # Discover orchestrator for the realm
+        realm_orchestrator = await self._discover_realm_orchestrator(realm)
+        if not realm_orchestrator:
+            raise ValueError(
+                f"Orchestrator not found for realm '{realm}'. "
+                f"Cannot execute MCP tool '{tool_name}'. "
+                f"Ensure {realm} realm orchestrator is initialized and discoverable."
+            )
+        
+        if not hasattr(realm_orchestrator, 'mcp_server') or realm_orchestrator.mcp_server is None:
+            raise ValueError(
+                f"Orchestrator '{realm_orchestrator.service_name}' for realm '{realm}' does not have an MCP server. "
+                f"Cannot execute MCP tool '{tool_name}'. "
+                f"Ensure {realm} orchestrator initializes MCP server in _initialize_mcp_server()."
+            )
+        
+        # Use provided user_context or default from agent
+        final_user_context = user_context or getattr(self, 'user_context', None)
+        
+        # Execute tool via realm's MCP server
+        self.logger.debug(
+            f"🔄 Cross-realm MCP tool execution: {self.agent_name} -> {realm} realm -> {tool_name}"
+        )
+        return await realm_orchestrator.mcp_server.execute_tool(tool_name, parameters, final_user_context)
+    
+    async def _discover_realm_orchestrator(self, realm: str) -> Optional[Any]:
+        """
+        Discover orchestrator for a specific realm.
+        
+        Uses multiple discovery strategies:
+        1. Orchestrator's get_realm_orchestrator() method (if available)
+        2. Curator discovery
+        3. DI container lookup
+        
+        Args:
+            realm: Realm name (e.g., "content", "insights")
+        
+        Returns:
+            Orchestrator instance, or None if not found
+        """
+        # Strategy 1: Try to get orchestrator from agent's orchestrator (if it has discovery methods)
+        if self.orchestrator and hasattr(self.orchestrator, 'get_realm_orchestrator'):
+            try:
+                realm_orchestrator = await self.orchestrator.get_realm_orchestrator(realm)
+                if realm_orchestrator:
+                    self.logger.debug(f"✅ Discovered {realm} orchestrator via orchestrator.get_realm_orchestrator()")
+                    return realm_orchestrator
+            except Exception as e:
+                self.logger.debug(f"⚠️ get_realm_orchestrator() failed: {e}")
+        
+        # Strategy 2: Try Curator discovery
+        if hasattr(self, 'curator_foundation') and self.curator_foundation:
+            try:
+                # Discover orchestrator by realm name
+                orchestrator = await self.curator_foundation.discover_service(
+                    service_type=f"{realm}_journey_orchestrator",
+                    realm_name=realm
+                )
+                if orchestrator:
+                    self.logger.debug(f"✅ Discovered {realm} orchestrator via Curator")
+                    return orchestrator
+            except Exception as e:
+                self.logger.debug(f"⚠️ Curator discovery failed: {e}")
+        
+        # Strategy 3: Try DI container lookup
+        if hasattr(self, 'foundation_services') and self.foundation_services:
+            try:
+                # Try common orchestrator class names
+                orchestrator_class_names = [
+                    f"{realm.title()}JourneyOrchestrator",
+                    f"{realm.title()}Orchestrator",
+                    f"{realm}_journey_orchestrator"
+                ]
+                
+                for class_name in orchestrator_class_names:
+                    try:
+                        orchestrator = self.foundation_services.get_service(class_name)
+                        if orchestrator:
+                            self.logger.debug(f"✅ Discovered {realm} orchestrator via DI container: {class_name}")
+                            return orchestrator
+                    except Exception:
+                        continue
+            except Exception as e:
+                self.logger.debug(f"⚠️ DI container lookup failed: {e}")
+        
+        # Strategy 4: Try platform gateway (if available)
+        if hasattr(self, 'orchestrator') and self.orchestrator:
+            if hasattr(self.orchestrator, 'platform_gateway') and self.orchestrator.platform_gateway:
+                try:
+                    # Platform gateway may have orchestrator registry
+                    if hasattr(self.orchestrator.platform_gateway, 'get_orchestrator'):
+                        orchestrator = await self.orchestrator.platform_gateway.get_orchestrator(realm)
+                        if orchestrator:
+                            self.logger.debug(f"✅ Discovered {realm} orchestrator via Platform Gateway")
+                            return orchestrator
+                except Exception as e:
+                    self.logger.debug(f"⚠️ Platform Gateway lookup failed: {e}")
+        
+        self.logger.warning(f"⚠️ Could not discover orchestrator for realm '{realm}'")
+        return None
     
     def set_orchestrator(self, orchestrator: Any):
         """

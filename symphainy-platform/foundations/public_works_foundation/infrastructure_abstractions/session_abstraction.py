@@ -63,13 +63,27 @@ class SessionAbstraction:
         self.logger.info(f"✅ Session Abstraction initialized with injected adapter (type: {self.adapter_type})")
     
     async def create_session(self, 
-                           context: SessionContext) -> Session:
+                           context: SessionContext,
+                           session_data: Optional[Dict[str, Any]] = None) -> Session:
         """Create a new session with infrastructure-level coordination."""
         try:
             self.logger.debug(f"Creating session with {self.adapter_type}")
             
             # Add infrastructure-level context
             enhanced_context = self._enhance_context(context)
+            
+            # Extract session_data from context metadata if not provided
+            if session_data is None:
+                session_data = enhanced_context.metadata.get("session_data", {})
+                # If still None, extract from context metadata directly
+                if not session_data:
+                    session_data = {
+                        "user_id": enhanced_context.metadata.get("user_id"),
+                        "session_id": enhanced_context.metadata.get("session_id"),
+                        "session_type": enhanced_context.metadata.get("session_type", "user"),
+                        "context": enhanced_context.metadata.get("context", {}),
+                        "metadata": enhanced_context.metadata
+                    }
             
             # Create session with retry logic
             result = await self._execute_with_retry(

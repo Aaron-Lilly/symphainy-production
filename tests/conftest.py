@@ -247,6 +247,11 @@ async def public_works_foundation(di_container):
     foundation = PublicWorksFoundationService(di_container)
     await foundation.initialize()
     
+    # CRITICAL: Ensure Public Works Foundation is accessible in DI container
+    # Smart City services access it via di_container.public_works_foundation
+    # The DI container should already have it set during foundation initialization, but ensure it's there
+    di_container.public_works_foundation = foundation
+    
     yield foundation
     
     # Cleanup

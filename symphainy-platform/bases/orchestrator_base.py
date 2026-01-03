@@ -353,6 +353,83 @@ class OrchestratorBase(ABC):
             self.logger.debug(f"Foundation service {service_name} not available: {e}")
             return None
     
+    async def get_realm_orchestrator(self, realm: str) -> Optional[Any]:
+        """
+        Discover orchestrator for a specific realm (for cross-realm MCP tool access).
+        
+        This method enables orchestrators to discover other realm orchestrators,
+        allowing agents to access MCP tools from other realms.
+        
+        Args:
+            realm: Realm name (e.g., "content", "insights", "solution")
+        
+        Returns:
+            Orchestrator instance for the specified realm, or None if not found
+        
+        Example:
+            ```python
+            content_orchestrator = await self.get_realm_orchestrator("content")
+            if content_orchestrator and content_orchestrator.mcp_server:
+                result = await content_orchestrator.mcp_server.execute_tool("get_parsed_file", {...})
+            ```
+        """
+        # Strategy 1: Try Curator discovery
+        try:
+            curator = await self.get_foundation_service("CuratorFoundationService")
+            if curator:
+                # Try common orchestrator service names
+                service_names = [
+                    f"{realm.title()}JourneyOrchestratorService",
+                    f"{realm}_journey_orchestrator",
+                    f"{realm.title()}OrchestratorService"
+                ]
+                
+                for service_name in service_names:
+                    try:
+                        orchestrator = await curator.discover_service(
+                            service_name=service_name,
+                            realm_name=realm
+                        )
+                        if orchestrator:
+                            self.logger.debug(f"✅ Discovered {realm} orchestrator via Curator: {service_name}")
+                            return orchestrator
+                    except Exception:
+                        continue
+        except Exception as e:
+            self.logger.debug(f"⚠️ Curator discovery failed for {realm} orchestrator: {e}")
+        
+        # Strategy 2: Try DI container lookup
+        try:
+            orchestrator_class_names = [
+                f"{realm.title()}JourneyOrchestrator",
+                f"{realm.title()}Orchestrator",
+                f"{realm}_journey_orchestrator"
+            ]
+            
+            for class_name in orchestrator_class_names:
+                try:
+                    orchestrator = self.di_container.get_service(class_name)
+                    if orchestrator:
+                        self.logger.debug(f"✅ Discovered {realm} orchestrator via DI container: {class_name}")
+                        return orchestrator
+                except Exception:
+                    continue
+        except Exception as e:
+            self.logger.debug(f"⚠️ DI container lookup failed for {realm} orchestrator: {e}")
+        
+        # Strategy 3: Try platform gateway (if it has orchestrator registry)
+        try:
+            if hasattr(self.platform_gateway, 'get_orchestrator'):
+                orchestrator = await self.platform_gateway.get_orchestrator(realm)
+                if orchestrator:
+                    self.logger.debug(f"✅ Discovered {realm} orchestrator via Platform Gateway")
+                    return orchestrator
+        except Exception as e:
+            self.logger.debug(f"⚠️ Platform Gateway lookup failed for {realm} orchestrator: {e}")
+        
+        self.logger.warning(f"⚠️ Could not discover orchestrator for realm '{realm}'")
+        return None
+    
     async def discover_agent(self, agent_name: str) -> Optional[Any]:
         """
         Discover an agent via Curator.
