@@ -92,14 +92,21 @@ else:
 
 ## Recommendation
 
-### ✅ Accept as Exception (with Guidelines)
+### ✅ Use Content MCP Tools (Updated Decision)
 
-**Decision:** Accept `semantic_data` abstraction access as an exception, similar to LLM, **BUT** with these guidelines:
+**Decision:** Agents should use Content MCP tools for semantic data access, not direct abstraction access.
 
-1. **Preferred Pattern:** Always try orchestrator SOA APIs first
-2. **Fallback Only:** Direct abstraction access should only be used as a fallback
-3. **Documentation:** Clearly document this as an acceptable exception
-4. **Future Migration:** Plan to migrate to MCP tools when orchestrators expose semantic data SOA APIs
+**Rationale:**
+- Semantic data (embeddings) are created and stored as part of the Content realm's workflow
+- Maintains consistency - all data access goes through realm orchestrators
+- Provides proper authorization, audit, and correlation
+- Follows the unified MCP pattern more strictly
+
+**Implementation:**
+1. **ContentJourneyOrchestrator** exposes `get_semantic_embeddings` as an SOA API
+2. **ContentMCPServer** automatically registers it as `content_get_semantic_embeddings` MCP tool
+3. **Agents** use `execute_mcp_tool("content_get_semantic_embeddings", ...)` for cross-realm access
+4. **No fallback** - agents should use MCP tools exclusively
 
 ### Implementation Guidelines
 

@@ -196,28 +196,25 @@ class InsightsBusinessAnalysisAgent(AgentBase):
             # Convert UserContext to dict if needed
             user_context_dict = self._convert_user_context(user_context)
             
-            # Step 1: Get semantic embeddings for schema via Data Solution Orchestrator (Phase 6)
-            if self.orchestrator and hasattr(self.orchestrator, 'get_semantic_embeddings_via_data_solution'):
-                embeddings = await self.orchestrator.get_semantic_embeddings_via_data_solution(
-                    content_id=content_id,
-                    embedding_type="schema",
-                    user_context=user_context_dict
-                )
-            else:
-                # Fallback: try semantic data abstraction (for backward compatibility)
-                semantic_data = await self.get_business_abstraction("semantic_data")
-                if semantic_data:
-                    embeddings = await semantic_data.get_semantic_embeddings(
-                        content_id=content_id,
-                        filters={"embedding_type": "schema"},
-                        user_context=user_context_dict
-                    )
-                else:
-                    return {
-                        "success": False,
-                        "error": "Orchestrator and semantic data abstraction not available",
-                        "content_id": content_id
-                    }
+            # Step 1: Get semantic embeddings for schema via Content MCP tools (unified pattern)
+            # Preferred: Use Content realm MCP tools for semantic data access
+            embeddings_result = await self.execute_mcp_tool(
+                "content_get_semantic_embeddings",  # Cross-realm: Content realm MCP tool
+                {
+                    "content_id": content_id,
+                    "filters": {"embedding_type": "schema"},
+                    "user_context": user_context_dict
+                }
+            )
+            
+            if not embeddings_result.get("success"):
+                return {
+                    "success": False,
+                    "error": embeddings_result.get("error", "Failed to get semantic embeddings"),
+                    "content_id": content_id
+                }
+            
+            embeddings = embeddings_result.get("embeddings", [])
             
             if not embeddings:
                 return {
@@ -323,28 +320,25 @@ class InsightsBusinessAnalysisAgent(AgentBase):
             # Convert UserContext to dict if needed
             user_context_dict = self._convert_user_context(user_context)
             
-            # Step 1: Get chunk embeddings via Data Solution Orchestrator (Phase 6)
-            if self.orchestrator and hasattr(self.orchestrator, 'get_semantic_embeddings_via_data_solution'):
-                embeddings = await self.orchestrator.get_semantic_embeddings_via_data_solution(
-                    content_id=content_id,
-                    embedding_type="chunk",
-                    user_context=user_context_dict
-                )
-            else:
-                # Fallback: try semantic data abstraction (for backward compatibility)
-                semantic_data = await self.get_business_abstraction("semantic_data")
-                if semantic_data:
-                    embeddings = await semantic_data.get_semantic_embeddings(
-                        content_id=content_id,
-                        filters={"embedding_type": "chunk"},
-                        user_context=user_context_dict
-                    )
-                else:
-                    return {
-                        "success": False,
-                        "error": "Orchestrator and semantic data abstraction not available",
-                        "content_id": content_id
-                    }
+            # Step 1: Get chunk embeddings via Content MCP tools (unified pattern)
+            # Preferred: Use Content realm MCP tools for semantic data access
+            embeddings_result = await self.execute_mcp_tool(
+                "content_get_semantic_embeddings",  # Cross-realm: Content realm MCP tool
+                {
+                    "content_id": content_id,
+                    "filters": {"embedding_type": "chunk"},
+                    "user_context": user_context_dict
+                }
+            )
+            
+            if not embeddings_result.get("success"):
+                return {
+                    "success": False,
+                    "error": embeddings_result.get("error", "Failed to get semantic embeddings"),
+                    "content_id": content_id
+                }
+            
+            embeddings = embeddings_result.get("embeddings", [])
             
             if not embeddings:
                 return {

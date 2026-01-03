@@ -955,33 +955,24 @@ Return only the JSON, no additional text."""
     ) -> Dict[str, Any]:
         """Generate visualization spec from natural language using OpenAI LLM."""
         try:
-            # Get schema metadata for context via Data Solution Orchestrator (Phase 6)
+            # Get schema metadata for context via Content MCP tools (unified pattern)
+            embeddings_result = await self.execute_mcp_tool(
+                "content_get_semantic_embeddings",  # Cross-realm: Content realm MCP tool
+                {
+                    "content_id": content_id,
+                    "filters": {"embedding_type": "schema"},
+                    "user_context": self._convert_user_context(user_context)
+                }
+            )
+            
             schema_metadata = None
-            if self.insights_orchestrator and hasattr(self.insights_orchestrator, 'get_semantic_embeddings_via_data_solution'):
-                embeddings = await self.insights_orchestrator.get_semantic_embeddings_via_data_solution(
-                    content_id=content_id,
-                    embedding_type="schema",
-                    user_context=self._convert_user_context(user_context)
-                )
+            if embeddings_result.get("success"):
+                embeddings = embeddings_result.get("embeddings", [])
                 if embeddings:
                     schema_metadata = {
                         "columns": [emb.get("column_name") for emb in embeddings if emb.get("column_name")],
                         "content_id": content_id
                     }
-            else:
-                # Fallback: try semantic data abstraction (for backward compatibility)
-                semantic_data = await self.get_business_abstraction("semantic_data")
-                if semantic_data:
-                    embeddings = await semantic_data.get_semantic_embeddings(
-                        content_id=content_id,
-                        filters={"embedding_type": "schema"},
-                        user_context=self._convert_user_context(user_context)
-                    )
-                    if embeddings:
-                        schema_metadata = {
-                            "columns": [emb.get("column_name") for emb in embeddings if emb.get("column_name")],
-                            "content_id": content_id
-                        }
             
             # Build prompt
             prompt = f"""Generate a visualization specification from the following natural language query.

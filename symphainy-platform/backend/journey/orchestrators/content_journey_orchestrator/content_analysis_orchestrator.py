@@ -240,6 +240,38 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     "required": ["parsed_file_id"]
                 },
                 "description": "Get parsed file data (wraps ContentSteward.get_parsed_file())"
+            },
+            "get_semantic_embeddings": {
+                "handler": self.get_semantic_embeddings,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "content_id": {
+                            "type": "string",
+                            "description": "Content metadata ID (optional, if None queries all embeddings)"
+                        },
+                        "filters": {
+                            "type": "object",
+                            "description": "Optional filters (embedding_type, column_name, file_id, etc.)",
+                            "properties": {
+                                "embedding_type": {
+                                    "type": "string",
+                                    "enum": ["schema", "chunk", "metadata", "meaning", "samples"],
+                                    "description": "Type of embedding to retrieve"
+                                },
+                                "column_name": {"type": "string"},
+                                "file_id": {"type": "string"},
+                                "parsed_file_id": {"type": "string"}
+                            }
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context for security and tenant validation"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Get semantic embeddings from the semantic data layer (wraps Librarian.get_semantic_embeddings())"
             }
         }
     
@@ -293,6 +325,73 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 "success": False,
                 "error": str(e),
                 "parsed_file_id": parsed_file_id
+            }
+    
+    async def get_semantic_embeddings(
+        self,
+        content_id: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get semantic embeddings from the semantic data layer.
+        
+        This method wraps Librarian.get_semantic_embeddings() to expose it as an SOA API
+        for agents to access via MCP tools. This is the preferred way for agents to access
+        semantic data (embeddings) rather than accessing the abstraction directly.
+        
+        Args:
+            content_id: Optional content metadata ID (if None, queries all embeddings)
+            filters: Optional filters (embedding_type, column_name, file_id, parsed_file_id, etc.)
+            user_context: Optional user context for security and tenant validation
+        
+        Returns:
+            Dict with success status and embeddings list:
+            {
+                "success": bool,
+                "embeddings": List[Dict[str, Any]],
+                "count": int
+            }
+        """
+        try:
+            # Get Librarian API (Smart City service that manages semantic data)
+            # Orchestrators compose RealmServiceBase, so delegate to _realm_service
+            librarian = await self._realm_service.get_librarian_api()
+            if not librarian:
+                return {
+                    "success": False,
+                    "error": "Librarian not available",
+                    "embeddings": [],
+                    "count": 0
+                }
+            
+            # Call Librarian.get_semantic_embeddings()
+            # Librarian wraps SemanticDataAbstraction with proper security and audit
+            embeddings = await librarian.get_semantic_embeddings(
+                content_id=content_id,
+                filters=filters,
+                user_context=user_context
+            )
+            
+            if not embeddings:
+                embeddings = []
+            
+            return {
+                "success": True,
+                "embeddings": embeddings,
+                "count": len(embeddings),
+                "content_id": content_id,
+                "filters": filters
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Get semantic embeddings failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "embeddings": [],
+                "count": 0,
+                "content_id": content_id
             }
     
     async def _initialize_mcp_server(self):

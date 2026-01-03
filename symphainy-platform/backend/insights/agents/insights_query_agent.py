@@ -333,25 +333,21 @@ class InsightsQueryAgent(AgentBase):
             Schema metadata dict with columns, types, etc.
         """
         try:
-            # Phase 6: Use Data Solution Orchestrator via orchestrator (maintains security boundary)
-            if self.orchestrator and hasattr(self.orchestrator, 'get_semantic_embeddings_via_data_solution'):
-                embeddings = await self.orchestrator.get_semantic_embeddings_via_data_solution(
-                    content_id=content_id,
-                    embedding_type="schema",
-                    user_context=user_context
-                )
-            else:
-                # Fallback: try semantic data abstraction (for backward compatibility)
-                semantic_data = await self.get_business_abstraction("semantic_data")
-                if semantic_data:
-                    embeddings = await semantic_data.get_semantic_embeddings(
-                        content_id=content_id,
-                        filters={"embedding_type": "schema"},
-                        user_context=user_context
-                    )
-                else:
-                    self.logger.warning("⚠️ Orchestrator and semantic data abstraction not available")
-                    return None
+            # Use Content MCP tools for semantic data access (unified pattern)
+            embeddings_result = await self.execute_mcp_tool(
+                "content_get_semantic_embeddings",  # Cross-realm: Content realm MCP tool
+                {
+                    "content_id": content_id,
+                    "filters": {"embedding_type": "schema"},
+                    "user_context": user_context
+                }
+            )
+            
+            if not embeddings_result.get("success"):
+                self.logger.warning(f"⚠️ Failed to get semantic embeddings: {embeddings_result.get('error')}")
+                return None
+            
+            embeddings = embeddings_result.get("embeddings", [])
             
             if not embeddings:
                 return None
