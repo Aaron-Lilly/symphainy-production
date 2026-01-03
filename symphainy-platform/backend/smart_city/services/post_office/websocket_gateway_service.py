@@ -19,6 +19,7 @@ from collections import defaultdict
 
 from fastapi import WebSocket, WebSocketDisconnect
 from bases.smart_city_role_base import SmartCityRoleBase
+from .connection_registry import ConnectionRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -55,16 +56,15 @@ class WebSocketGatewayService(SmartCityRoleBase):
         
         # Connection Management
         self.local_connections: Dict[str, WebSocket] = {}
-        self.connection_metadata: Dict[str, Dict[str, Any]] = {}
-        self.channel_connections: Dict[str, Set[str]] = defaultdict(set)  # channel -> connection_ids
+        self.connection_registry: Optional[ConnectionRegistry] = None  # Redis-backed registry
         
-        # Connection tracking (in-memory for Phase 1, will move to Redis in Phase 2)
+        # Connection tracking (in-memory for limits, Redis for state)
         self.connection_limits = {
             "max_per_user": 5,
             "max_global": 1000
         }
-        self.user_connections: Dict[str, int] = defaultdict(int)
-        self.global_connections = 0
+        self.user_connections: Dict[str, int] = defaultdict(int)  # Local tracking for limits
+        self.global_connections = 0  # Local tracking for limits
         
         # Service state
         self.is_ready_flag = False
@@ -88,6 +88,9 @@ class WebSocketGatewayService(SmartCityRoleBase):
             self.messaging_abstraction = self.get_messaging_abstraction()
             if not self.messaging_abstraction:
                 raise Exception("Messaging Abstraction (Redis) not available")
+            
+            # Initialize Redis-backed connection registry
+            self.connection_registry = ConnectionRegistry(self.messaging_abstraction)
             
             # Check readiness
             self.is_ready_flag = await self.is_ready()
@@ -218,17 +221,25 @@ class WebSocketGatewayService(SmartCityRoleBase):
             # Generate connection ID
             connection_id = f"ws_{session_id_key}_{uuid.uuid4().hex[:8]}"
             
-            # Register locally
+            # Register locally (for WebSocket handling)
             self.local_connections[connection_id] = websocket
-            self.connection_metadata[connection_id] = {
-                "connection_id": connection_id,
-                "session_token": session_token,
+            
+            # Register in Redis (for horizontal scaling)
+            metadata = {
                 "user_id": session.get("user_id") if session else None,
-                "connected_at": datetime.utcnow().isoformat(),
-                "last_activity": datetime.utcnow().isoformat()
+                "connected_at": datetime.utcnow().isoformat()
             }
             
-            # Update connection counts
+            if self.connection_registry:
+                await self.connection_registry.register_connection(
+                    connection_id=connection_id,
+                    session_token=session_token,
+                    channel="guide",  # Default channel, can change
+                    metadata=metadata,
+                    gateway_instance_id=self.instance_id
+                )
+            
+            # Update connection counts (local tracking for limits)
             self.user_connections[session_id_key] += 1
             self.global_connections += 1
             
@@ -273,9 +284,9 @@ class WebSocketGatewayService(SmartCityRoleBase):
             # Parse message
             data = json.loads(message)
             
-            # Update last activity
-            if connection_id in self.connection_metadata:
-                self.connection_metadata[connection_id]["last_activity"] = datetime.utcnow().isoformat()
+            # Update last activity in Redis
+            if self.connection_registry:
+                await self.connection_registry.update_connection_activity(connection_id)
             
             # Extract channel from new format: { channel: "guide" | "pillar:content", intent: "...", payload: {...} }
             # Or fallback to old format for transition: { agent_type: "...", pillar: "...", message: "..." }
@@ -333,8 +344,9 @@ class WebSocketGatewayService(SmartCityRoleBase):
                         message_with_metadata
                     )
             
-            # Track channel subscription
-            self.channel_connections[channel].add(connection_id)
+            # Track channel subscription in Redis
+            if self.connection_registry:
+                await self.connection_registry.add_channel_subscription(connection_id, channel)
             
             if self.logger:
                 self.logger.debug(
@@ -367,24 +379,24 @@ class WebSocketGatewayService(SmartCityRoleBase):
             return
         
         try:
+            # Get connection info from Redis before cleanup
+            conn = None
+            if self.connection_registry:
+                conn = await self.connection_registry.get_connection(connection_id)
+            
             # Remove from local connections
             if connection_id in self.local_connections:
                 del self.local_connections[connection_id]
             
-            # Remove from metadata
-            if connection_id in self.connection_metadata:
-                metadata = self.connection_metadata[connection_id]
-                session_token = metadata.get("session_token", "anonymous")
-                
-                # Update connection counts
+            # Unregister from Redis
+            if self.connection_registry:
+                await self.connection_registry.unregister_connection(connection_id)
+            
+            # Update connection counts (local tracking)
+            if conn:
+                session_token = conn.get("session_token", "anonymous")
                 self.user_connections[session_token] = max(0, self.user_connections[session_token] - 1)
                 self.global_connections = max(0, self.global_connections - 1)
-                
-                # Remove from channel subscriptions
-                for channel, connections in self.channel_connections.items():
-                    connections.discard(connection_id)
-                
-                del self.connection_metadata[connection_id]
             
             if self.logger:
                 self.logger.info(f"✅ Connection cleaned up: {connection_id}")
@@ -425,11 +437,22 @@ class WebSocketGatewayService(SmartCityRoleBase):
                 self.logger.error(f"❌ Failed to send message to {connection_id}: {e}")
             return False
     
-    def get_connection_count(self) -> Dict[str, int]:
-        """Get current connection statistics."""
-        return {
-            "global": self.global_connections,
-            "per_user": dict(self.user_connections),
-            "by_channel": {channel: len(connections) for channel, connections in self.channel_connections.items()}
-        }
+    async def get_connection_count(self) -> Dict[str, Any]:
+        """Get current connection statistics from Redis."""
+        if self.connection_registry:
+            redis_stats = await self.connection_registry.get_connection_count()
+            return {
+                "global": redis_stats.get("total", self.global_connections),
+                "per_user": dict(self.user_connections),  # Local tracking
+                "by_channel": redis_stats.get("by_channel", {}),
+                "by_gateway": redis_stats.get("by_gateway", {})
+            }
+        else:
+            # Fallback to local stats if registry not available
+            return {
+                "global": self.global_connections,
+                "per_user": dict(self.user_connections),
+                "by_channel": {},
+                "by_gateway": {}
+            }
 

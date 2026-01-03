@@ -136,15 +136,30 @@ class ConductorService(SmartCityRoleBase, ConductorServiceProtocol):
             return True
             
         except Exception as e:
-            # Use enhanced error handling with audit
-            await self.handle_error_with_audit(e, "conductor_initialize")
+            # Error handling with audit
+            await self.handle_error_with_audit(
+                e,
+                "conductor_initialize",
+                {
+                    "service": "ConductorService",
+                    "error_type": type(e).__name__
+                }
+            )
+            
             self.service_health = "unhealthy"
             
-            # End telemetry tracking with failure
+            # Log failure
             await self.log_operation_with_telemetry(
                 "conductor_initialize_complete",
                 success=False,
-                details={"error": str(e)}
+                details={"error": str(e), "error_type": type(e).__name__}
+            )
+            
+            # Record health metric
+            await self.record_health_metric(
+                "conductor_initialized",
+                0.0,
+                metadata={"error_type": type(e).__name__}
             )
             
             return False
@@ -155,30 +170,103 @@ class ConductorService(SmartCityRoleBase, ConductorServiceProtocol):
     
     async def create_workflow(self, request: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create workflow with task definitions."""
+        # Start telemetry tracking
+        await self.log_operation_with_telemetry(
+            "create_workflow_start",
+            success=True,
+            details={"workflow_name": request.get("workflow_name")}
+        )
+        
         # Service-level method delegates to module (module handles utilities)
         try:
             workflow_id = await self.workflow_module.create_workflow(request, user_context)
+            
+            # Log success
+            await self.log_operation_with_telemetry(
+                "create_workflow_complete",
+                success=True,
+                details={"workflow_id": workflow_id}
+            )
+            
+            # Record health metric
+            await self.record_health_metric(
+                "create_workflow_success",
+                1.0,
+                metadata={"workflow_name": request.get("workflow_name")}
+            )
+            
             return {
                 "workflow_id": workflow_id,
                 "status": "created",
                 "success": True
             }
         except Exception as e:
-            await self.handle_error_with_audit(e, "create_workflow")
+            # Error handling with audit
+            await self.handle_error_with_audit(
+                e,
+                "create_workflow",
+                {
+                    "workflow_name": request.get("workflow_name"),
+                    "error_type": type(e).__name__
+                }
+            )
+            
+            # Log failure
+            await self.log_operation_with_telemetry(
+                "create_workflow_failed",
+                success=False,
+                details={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "workflow_name": request.get("workflow_name")
+                }
+            )
+            
+            # Record health metric
+            await self.record_health_metric(
+                "create_workflow_success",
+                0.0,
+                metadata={"error_type": type(e).__name__}
+            )
+            
             return {
                 "workflow_id": None,
                 "status": "failed",
                 "error": str(e),
+                "error_code": type(e).__name__,
+                "error_type": "unexpected_error",
                 "success": False
             }
     
     async def execute_workflow(self, request: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute workflow with given parameters."""
+        # Start telemetry tracking
+        workflow_id = request.get("workflow_id")
+        await self.log_operation_with_telemetry(
+            "execute_workflow_start",
+            success=True,
+            details={"workflow_id": workflow_id}
+        )
+        
         # Service-level method delegates to module (module handles utilities)
         try:
-            workflow_id = request.get("workflow_id")
             parameters = request.get("parameters")
             execution_id = await self.workflow_module.execute_workflow(workflow_id, parameters, user_context)
+            
+            # Log success
+            await self.log_operation_with_telemetry(
+                "execute_workflow_complete",
+                success=True,
+                details={"execution_id": execution_id, "workflow_id": workflow_id}
+            )
+            
+            # Record health metric
+            await self.record_health_metric(
+                "execute_workflow_success",
+                1.0,
+                metadata={"workflow_id": workflow_id}
+            )
+            
             return {
                 "execution_id": execution_id,
                 "workflow_id": workflow_id,
@@ -186,11 +274,40 @@ class ConductorService(SmartCityRoleBase, ConductorServiceProtocol):
                 "success": True
             }
         except Exception as e:
-            await self.handle_error_with_audit(e, "execute_workflow")
+            # Error handling with audit
+            await self.handle_error_with_audit(
+                e,
+                "execute_workflow",
+                {
+                    "workflow_id": workflow_id,
+                    "error_type": type(e).__name__
+                }
+            )
+            
+            # Log failure
+            await self.log_operation_with_telemetry(
+                "execute_workflow_failed",
+                success=False,
+                details={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "workflow_id": workflow_id
+                }
+            )
+            
+            # Record health metric
+            await self.record_health_metric(
+                "execute_workflow_success",
+                0.0,
+                metadata={"workflow_id": workflow_id, "error_type": type(e).__name__}
+            )
+            
             return {
                 "execution_id": None,
                 "status": "failed",
                 "error": str(e),
+                "error_code": type(e).__name__,
+                "error_type": "unexpected_error",
                 "success": False
             }
     

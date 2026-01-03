@@ -118,15 +118,30 @@ class LibrarianService(SmartCityRoleBase, LibrarianServiceProtocol):
             return True
             
         except Exception as e:
-            # Use enhanced error handling with audit
-            await self.handle_error_with_audit(e, "librarian_initialize")
+            # Error handling with audit
+            await self.handle_error_with_audit(
+                e,
+                "librarian_initialize",
+                {
+                    "service": "LibrarianService",
+                    "error_type": type(e).__name__
+                }
+            )
+            
             self.service_health = "unhealthy"
             
-            # End telemetry tracking with failure
+            # Log failure
             await self.log_operation_with_telemetry(
                 "librarian_initialize_complete",
                 success=False,
-                details={"error": str(e)}
+                details={"error": str(e), "error_type": type(e).__name__}
+            )
+            
+            # Record health metric
+            await self.record_health_metric(
+                "librarian_initialized",
+                0.0,
+                metadata={"error_type": type(e).__name__}
             )
             
             return False

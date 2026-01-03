@@ -77,6 +77,31 @@ class SoaMcp:
                 "method": "POST",
                 "description": "Orchestrate event-driven communication patterns",
                 "parameters": ["event_type", "event_data"]
+            },
+            # WebSocket Gateway SOA APIs (Phase 2)
+            "get_websocket_endpoint": {
+                "endpoint": "/api/post-office/websocket/endpoint",
+                "method": "GET",
+                "description": "Get WebSocket endpoint URL for realm",
+                "parameters": ["session_token", "realm"]
+            },
+            "publish_to_agent_channel": {
+                "endpoint": "/api/post-office/websocket/publish",
+                "method": "POST",
+                "description": "Publish message to agent channel",
+                "parameters": ["channel", "message", "realm"]
+            },
+            "subscribe_to_channel": {
+                "endpoint": "/api/post-office/websocket/subscribe",
+                "method": "POST",
+                "description": "Subscribe to channel for realm",
+                "parameters": ["channel", "callback", "realm"]
+            },
+            "send_to_connection": {
+                "endpoint": "/api/post-office/websocket/send",
+                "method": "POST",
+                "description": "Send message to specific WebSocket connection",
+                "parameters": ["connection_id", "message"]
             }
         }
     
@@ -102,6 +127,27 @@ class SoaMcp:
                 "name": "communication_orchestrator",
                 "description": "Orchestrate communication patterns",
                 "parameters": ["pattern_type", "pattern_data", "orchestration_options"]
+            },
+            # WebSocket Gateway MCP Tools (Phase 2)
+            "websocket_get_endpoint": {
+                "name": "websocket_get_endpoint",
+                "description": "Get WebSocket endpoint URL for realm (for agents to connect)",
+                "parameters": ["session_token", "realm"]
+            },
+            "websocket_publish_to_channel": {
+                "name": "websocket_publish_to_channel",
+                "description": "Publish message to agent channel via WebSocket",
+                "parameters": ["channel", "message", "realm"]
+            },
+            "websocket_subscribe_to_channel": {
+                "name": "websocket_subscribe_to_channel",
+                "description": "Subscribe to WebSocket channel to receive messages",
+                "parameters": ["channel", "realm"]
+            },
+            "websocket_send_to_connection": {
+                "name": "websocket_send_to_connection",
+                "description": "Send message to specific WebSocket connection",
+                "parameters": ["connection_id", "message"]
             }
         }
     
@@ -279,6 +325,144 @@ class SoaMcp:
                                     "pattern_data": {"type": "object"},
                                     "orchestration_options": {"type": "object"}
                                 }
+                            }
+                        }
+                    }
+                }
+            })
+            
+            # Create websocket_gateway capability (Phase 2)
+            capabilities.append({
+                "name": "websocket_gateway",
+                "protocol": "PostOfficeServiceProtocol",
+                "description": "WebSocket Gateway for real-time communication",
+                "contracts": {
+                    "soa_api": {
+                        "api_name": "get_websocket_endpoint",
+                        "endpoint": self.service.soa_apis.get("get_websocket_endpoint", {}).get("endpoint", "/soa/post-office/get_websocket_endpoint"),
+                        "method": self.service.soa_apis.get("get_websocket_endpoint", {}).get("method", "GET"),
+                        "handler": getattr(self.service, "get_websocket_endpoint", None),
+                        "metadata": {
+                            "description": "WebSocket Gateway capabilities",
+                            "apis": ["get_websocket_endpoint", "publish_to_agent_channel", "subscribe_to_channel", "send_to_connection"]
+                        }
+                    },
+                    "mcp_tool": {
+                        "tool_name": "post_office_websocket_get_endpoint",
+                        "mcp_server": "smart_city_mcp_server",
+                        "tool_definition": {
+                            "name": "post_office_websocket_get_endpoint",
+                            "description": "Get WebSocket endpoint URL for realm (for agents to connect)",
+                            "input_schema": {
+                                "type": "object",
+                                "properties": {
+                                    "session_token": {"type": "string"},
+                                    "realm": {"type": "string"}
+                                },
+                                "required": ["session_token", "realm"]
+                            }
+                        }
+                    }
+                }
+            })
+            
+            # Create websocket_publish capability (Phase 2)
+            capabilities.append({
+                "name": "websocket_publish",
+                "protocol": "PostOfficeServiceProtocol",
+                "description": "Publish messages to WebSocket channels",
+                "contracts": {
+                    "soa_api": {
+                        "api_name": "publish_to_agent_channel",
+                        "endpoint": self.service.soa_apis.get("publish_to_agent_channel", {}).get("endpoint", "/soa/post-office/publish_to_agent_channel"),
+                        "method": self.service.soa_apis.get("publish_to_agent_channel", {}).get("method", "POST"),
+                        "handler": getattr(self.service, "publish_to_agent_channel", None),
+                        "metadata": {
+                            "description": "Publish message to agent channel via WebSocket"
+                        }
+                    },
+                    "mcp_tool": {
+                        "tool_name": "post_office_websocket_publish_to_channel",
+                        "mcp_server": "smart_city_mcp_server",
+                        "tool_definition": {
+                            "name": "post_office_websocket_publish_to_channel",
+                            "description": "Publish message to agent channel via WebSocket",
+                            "input_schema": {
+                                "type": "object",
+                                "properties": {
+                                    "channel": {"type": "string", "description": "Channel name (guide | pillar:content | pillar:insights | etc.)"},
+                                    "message": {"type": "object", "description": "Message to publish"},
+                                    "realm": {"type": "string", "description": "Realm publishing the message"}
+                                },
+                                "required": ["channel", "message", "realm"]
+                            }
+                        }
+                    }
+                }
+            })
+            
+            # Create websocket_subscribe capability (Phase 2)
+            capabilities.append({
+                "name": "websocket_subscribe",
+                "protocol": "PostOfficeServiceProtocol",
+                "description": "Subscribe to WebSocket channels",
+                "contracts": {
+                    "soa_api": {
+                        "api_name": "subscribe_to_channel",
+                        "endpoint": self.service.soa_apis.get("subscribe_to_channel", {}).get("endpoint", "/soa/post-office/subscribe_to_channel"),
+                        "method": self.service.soa_apis.get("subscribe_to_channel", {}).get("method", "POST"),
+                        "handler": getattr(self.service, "subscribe_to_channel", None),
+                        "metadata": {
+                            "description": "Subscribe to channel for realm"
+                        }
+                    },
+                    "mcp_tool": {
+                        "tool_name": "post_office_websocket_subscribe_to_channel",
+                        "mcp_server": "smart_city_mcp_server",
+                        "tool_definition": {
+                            "name": "post_office_websocket_subscribe_to_channel",
+                            "description": "Subscribe to WebSocket channel to receive messages",
+                            "input_schema": {
+                                "type": "object",
+                                "properties": {
+                                    "channel": {"type": "string", "description": "Channel name to subscribe to"},
+                                    "realm": {"type": "string", "description": "Realm subscribing to the channel"}
+                                },
+                                "required": ["channel", "realm"]
+                            }
+                        }
+                    }
+                }
+            })
+            
+            # Create websocket_send capability (Phase 2)
+            capabilities.append({
+                "name": "websocket_send",
+                "protocol": "PostOfficeServiceProtocol",
+                "description": "Send messages to specific WebSocket connections",
+                "contracts": {
+                    "soa_api": {
+                        "api_name": "send_to_connection",
+                        "endpoint": self.service.soa_apis.get("send_to_connection", {}).get("endpoint", "/soa/post-office/send_to_connection"),
+                        "method": self.service.soa_apis.get("send_to_connection", {}).get("method", "POST"),
+                        "handler": getattr(self.service, "send_to_connection", None),
+                        "metadata": {
+                            "description": "Send message to specific WebSocket connection"
+                        }
+                    },
+                    "mcp_tool": {
+                        "tool_name": "post_office_websocket_send_to_connection",
+                        "mcp_server": "smart_city_mcp_server",
+                        "tool_definition": {
+                            "name": "post_office_websocket_send_to_connection",
+                            "description": "Send message to specific WebSocket connection",
+                            "input_schema": {
+                                "type": "object",
+                                "properties": {
+                                    "connection_id": {"type": "string", "description": "Connection ID to send message to"},
+                                    "message": {"type": "object", "description": "Message to send"}
+                                },
+                                "required": ["connection_id", "message"]
                             }
                         }
                     }

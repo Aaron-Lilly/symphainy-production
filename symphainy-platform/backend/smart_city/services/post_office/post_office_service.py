@@ -11,6 +11,7 @@ HOW (Service Implementation): I use SmartCityRoleBase with micro-modules loaded 
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import json
 
 # Import ONLY our new base and protocol
 from bases.smart_city_role_base import SmartCityRoleBase
@@ -61,6 +62,9 @@ class PostOfficeService(SmartCityRoleBase, PostOfficeServiceProtocol):
         self.soa_mcp_module = None
         self.utilities_module = None
         
+        # WebSocket Gateway Service (Phase 2)
+        self.websocket_gateway_service = None
+        
         # Logger is initialized by SmartCityRoleBase
         if self.logger:
             self.logger.info("✅ Post Office Service (Micro-Modular) initialized")
@@ -93,6 +97,20 @@ class PostOfficeService(SmartCityRoleBase, PostOfficeServiceProtocol):
                        self.orchestration_module, self.soa_mcp_module, self.utilities_module]):
                 raise Exception("Failed to load required modules")
             
+            # Initialize WebSocket Gateway Service (Phase 2)
+            from .websocket_gateway_service import WebSocketGatewayService
+            self.websocket_gateway_service = WebSocketGatewayService(
+                di_container=self.di_container,
+                post_office_service=self
+            )
+            await self.websocket_gateway_service.initialize()
+            
+            # Register WebSocket Gateway with Consul (Phase 2)
+            await self._register_websocket_gateway_with_consul()
+            
+            if self.logger:
+                self.logger.info("✅ WebSocket Gateway Service initialized and registered")
+            
             # Initialize SOA/MCP using module
             await self.soa_mcp_module.initialize_soa_api_exposure()
             await self.soa_mcp_module.initialize_mcp_tool_integration()
@@ -120,15 +138,30 @@ class PostOfficeService(SmartCityRoleBase, PostOfficeServiceProtocol):
             return True
             
         except Exception as e:
-            # Use enhanced error handling with audit
-            await self.handle_error_with_audit(e, "post_office_initialize")
+            # Error handling with audit
+            await self.handle_error_with_audit(
+                e,
+                "post_office_initialize",
+                {
+                    "service": "PostOfficeService",
+                    "error_type": type(e).__name__
+                }
+            )
+            
             self.service_health = "unhealthy"
             
-            # End telemetry tracking with failure
+            # Log failure
             await self.log_operation_with_telemetry(
                 "post_office_initialize_complete",
                 success=False,
-                details={"error": str(e)}
+                details={"error": str(e), "error_type": type(e).__name__}
+            )
+            
+            # Record health metric
+            await self.record_health_metric(
+                "post_office_initialized",
+                0.0,
+                metadata={"error_type": type(e).__name__}
             )
             
             return False
@@ -241,3 +274,290 @@ class PostOfficeService(SmartCityRoleBase, PostOfficeServiceProtocol):
     async def get_service_capabilities(self) -> Dict[str, Any]:
         """Get service capabilities with proper infrastructure status."""
         return await self.utilities_module.get_service_capabilities()
+    
+    async def _register_websocket_gateway_with_consul(self):
+        """Register WebSocket Gateway Service with Consul (Phase 2)."""
+        try:
+            if not self.websocket_gateway_service:
+                return
+            
+            # Get Curator Foundation for service registration
+            curator = self.di_container.get_foundation_service("CuratorFoundationService")
+            if not curator:
+                if self.logger:
+                    self.logger.warning("⚠️ Curator Foundation not available, skipping Consul registration")
+                return
+            
+            # Prepare service metadata
+            service_metadata = {
+                "service_type": "websocket_gateway",
+                "address": "0.0.0.0",  # Will be discovered via Traefik
+                "port": 8000,  # Backend port (Traefik routes /ws to this)
+                "tags": ["websocket", "gateway", "post_office", "smart_city", "real-time"],
+                "realm": "smart_city",
+                "health_check_endpoint": "/health/websocket-gateway",
+                "endpoints": ["/ws"],
+                "capabilities": ["websocket_connection", "channel_routing", "message_fanout"]
+            }
+            
+            # Register via Curator (which uses Consul via Public Works)
+            registration = await curator.register_service(
+                service_instance=self.websocket_gateway_service,
+                service_metadata=service_metadata
+            )
+            
+            if registration and registration.get("success"):
+                if self.logger:
+                    self.logger.info(f"✅ WebSocket Gateway registered with Consul: {registration.get('service_id', 'unknown')}")
+            else:
+                if self.logger:
+                    self.logger.warning("⚠️ WebSocket Gateway Consul registration failed, continuing without service discovery")
+                    
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"❌ Failed to register WebSocket Gateway with Consul: {e}")
+    
+    # ============================================================================
+    # WEBSOCKET GATEWAY SOA APIs (Phase 2)
+    # ============================================================================
+    
+    async def get_websocket_endpoint(
+        self,
+        session_token: str,
+        realm: str
+    ) -> Dict[str, Any]:
+        """
+        Get WebSocket endpoint URL for realm.
+        
+        Used by Experience Realm to get WebSocket URL for frontend.
+        
+        Note: Realm access validation happens at Platform Gateway level.
+        This service trusts Platform Gateway has already validated.
+        
+        Args:
+            session_token: Session token for authentication
+            realm: Realm requesting the endpoint
+            
+        Returns:
+            Dict with websocket_url, channels, and message_format
+        """
+        try:
+            if not self.websocket_gateway_service:
+                return {
+                    "success": False,
+                    "error": "WebSocket Gateway Service not initialized"
+                }
+            
+            # Get gateway URL (will use Consul in Phase 2, for now use instance info)
+            # TODO: Phase 2 - Get from Consul service discovery
+            gateway_url = f"ws://localhost/ws"  # Placeholder, will be discovered via Consul
+            
+            return {
+                "success": True,
+                "websocket_url": f"{gateway_url}?session_token={session_token}",
+                "channels": [
+                    "guide",
+                    "pillar:content",
+                    "pillar:insights",
+                    "pillar:operations",
+                    "pillar:business_outcomes"
+                ],
+                "message_format": {
+                    "channel": "string (guide | pillar:content | pillar:insights | pillar:operations | pillar:business_outcomes)",
+                    "intent": "string (chat | query | command)",
+                    "payload": {
+                        "message": "string",
+                        "conversation_id": "string (optional)",
+                        "metadata": "object (optional)"
+                    }
+                }
+            }
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"❌ Failed to get WebSocket endpoint: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def publish_to_agent_channel(
+        self,
+        channel: str,
+        message: Dict[str, Any],
+        realm: str
+    ) -> Dict[str, Any]:
+        """
+        Publish message to agent channel.
+        
+        Used by Business Enablement agents to send messages via WebSocket.
+        
+        Note: Realm access validation happens at Platform Gateway level.
+        This service trusts Platform Gateway has already validated.
+        
+        Args:
+            channel: Channel name (e.g., "guide", "pillar:content")
+            message: Message to publish
+            realm: Realm publishing the message
+            
+        Returns:
+            Dict with status and channel info
+        """
+        try:
+            if not self.messaging_abstraction:
+                return {
+                    "success": False,
+                    "error": "Messaging abstraction not available"
+                }
+            
+            # Publish to Redis channel
+            redis_channel = f"websocket:{channel}"
+            
+            # Add metadata
+            message_with_metadata = {
+                "source": realm,
+                "message": message,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Publish to Redis
+            if hasattr(self.messaging_abstraction, 'publish'):
+                await self.messaging_abstraction.publish(
+                    redis_channel,
+                    json.dumps(message_with_metadata)
+                )
+            elif hasattr(self.messaging_abstraction, 'send_message'):
+                await self.messaging_abstraction.send_message(
+                    redis_channel,
+                    message_with_metadata
+                )
+            
+            return {
+                "success": True,
+                "status": "published",
+                "channel": redis_channel
+            }
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"❌ Failed to publish to channel {channel}: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def subscribe_to_channel(
+        self,
+        channel: str,
+        callback: Any,
+        realm: str
+    ) -> Dict[str, Any]:
+        """
+        Subscribe to channel for realm.
+        
+        Used by agents to receive messages from WebSocket connections.
+        
+        Note: Realm access validation happens at Platform Gateway level.
+        This service trusts Platform Gateway has already validated.
+        
+        Future: Agents should access this via MCP Tools (separate refactoring thread).
+        
+        Args:
+            channel: Channel name to subscribe to
+            callback: Callback function to handle messages
+            realm: Realm subscribing to the channel
+            
+        Returns:
+            Dict with subscription status
+        """
+        try:
+            if not self.messaging_abstraction:
+                return {
+                    "success": False,
+                    "error": "Messaging abstraction not available"
+                }
+            
+            # Subscribe to Redis channel
+            redis_channel = f"websocket:{channel}"
+            
+            # Create pubsub subscription
+            if hasattr(self.messaging_abstraction, 'pubsub'):
+                pubsub = self.messaging_abstraction.pubsub()
+                await pubsub.subscribe(redis_channel)
+                
+                # Start background task to handle messages
+                import asyncio
+                asyncio.create_task(self._handle_channel_messages(pubsub, callback))
+                
+                return {
+                    "success": True,
+                    "status": "subscribed",
+                    "channel": redis_channel
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Pub/Sub not available in messaging abstraction"
+                }
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"❌ Failed to subscribe to channel {channel}: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def _handle_channel_messages(self, pubsub: Any, callback: Any):
+        """Background task to handle channel messages."""
+        try:
+            async for message in pubsub.listen():
+                if message.get('type') == 'message':
+                    data = json.loads(message.get('data', '{}'))
+                    await callback(data)
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"❌ Error handling channel messages: {e}")
+    
+    async def send_to_connection(
+        self,
+        connection_id: str,
+        message: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Send message to specific WebSocket connection.
+        
+        Used by agents to send responses to WebSocket connections.
+        
+        Args:
+            connection_id: Connection ID to send message to
+            message: Message to send
+            
+        Returns:
+            Dict with send status
+        """
+        try:
+            if not self.websocket_gateway_service:
+                return {
+                    "success": False,
+                    "error": "WebSocket Gateway Service not initialized"
+                }
+            
+            # Delegate to WebSocket Gateway Service
+            success = await self.websocket_gateway_service.send_to_connection(
+                connection_id,
+                message
+            )
+            
+            return {
+                "success": success,
+                "connection_id": connection_id
+            }
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"❌ Failed to send to connection {connection_id}: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }

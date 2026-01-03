@@ -191,18 +191,32 @@ class SecurityGuardService(SmartCityRoleBase, SecurityGuardServiceProtocol):
             return True
             
         except Exception as e:
-            # Use enhanced error handling with audit
-            await self.handle_error_with_audit(e, "security_guard_initialize")
+            # Error handling with audit
+            await self.handle_error_with_audit(
+                e,
+                "security_guard_initialize",
+                {
+                    "service": "SecurityGuardService",
+                    "error_type": type(e).__name__
+                }
+            )
             
             self.service_health = "unhealthy"
             # Store error for debugging
             self.last_error = str(e)
             
-            # End telemetry tracking with failure
+            # Log failure
             await self.log_operation_with_telemetry(
                 "security_guard_initialize_complete",
                 success=False,
-                details={"error": str(e)}
+                details={"error": str(e), "error_type": type(e).__name__}
+            )
+            
+            # Record health metric
+            await self.record_health_metric(
+                "security_guard_initialized",
+                0.0,
+                metadata={"error_type": type(e).__name__}
             )
             
             error_msg = f"❌ Failed to initialize Security Guard Service: {e}"
