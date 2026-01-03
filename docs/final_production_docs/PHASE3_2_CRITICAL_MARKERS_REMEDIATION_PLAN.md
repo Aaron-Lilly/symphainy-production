@@ -969,9 +969,22 @@ result = await self.execute_mcp_tool(
    - Improved documentation
    - Warning for services that don't override
 
-5. **Remediation Summary Document**
+5. **Realm MCP Servers**
+   - Content Realm MCP Server (exposes Content realm SOA APIs)
+   - Insights Realm MCP Server (exposes Insights realm SOA APIs)
+   - Solution Realm MCP Server (exposes Solution orchestrator capabilities)
+   - Business Enablement Realm MCP Server (exposes enabling services)
+   - Updated Journey orchestrator MCP servers
+
+6. **Updated Agents**
+   - All agents use MCP tools (no direct service access)
+   - Agent base classes include execute_mcp_tool() helper
+   - Zero anti-patterns (direct service access removed)
+
+7. **Remediation Summary Document**
    - All changes documented
    - Architecture alignment verified
+   - Agentic-forward architecture enforced
 
 ---
 
@@ -980,7 +993,8 @@ result = await self.execute_mcp_tool(
 1. **Review and Approve Plan** - CTO review of remediation approach
 2. **Begin Phase 3.2.1** - Remove TEMPORARY shortcuts (Days 1-2)
 3. **Continue with Phases 3.2.2-3.2.4** - Fix remaining issues (Days 3-4)
-4. **Verification** - Test all changes and verify architecture alignment
+4. **Begin Phase 3.2.5** - MCP Server Architecture Overhaul (Days 5-7)
+5. **Verification** - Test all changes and verify architecture alignment
 
 ---
 
