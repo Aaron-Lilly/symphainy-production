@@ -50,8 +50,13 @@
      - `data_mapping_agent.py:73`
      - `insights_query_agent.py:345`
      - `insights_liaison_agent.py:393, 973`
-   - **Fix:** Business abstractions (LLM, semantic data) should be exposed via MCP tools OR documented as acceptable exceptions
-   - **Priority:** MEDIUM (infrastructure-level access may be acceptable)
+   - **Status:** ✅ **ACCEPTABLE EXCEPTION** (See `PHASE3_2_5_SEMANTIC_DATA_ANALYSIS.md`)
+   - **Reasoning:** 
+     - LLM: Pure infrastructure (AI inference) - acceptable exception
+     - Semantic Data: Infrastructure abstraction (Public Works Foundation) - acceptable exception when used as fallback
+     - Both are infrastructure-level access, not realm services
+     - Current code uses orchestrator methods first, falls back to direct access
+   - **Priority:** LOW (documented as acceptable exceptions)
 
 #### Archive/Deprecated Code (Can Ignore):
 - All violations in `archive/` and `business_enablement_old/` folders
