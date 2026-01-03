@@ -319,16 +319,28 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 self.processing_agent.set_orchestrator(self)
             
             # MCP Server initialization is handled by OrchestratorBase._initialize_mcp_server()
-            # (called automatically if orchestrator defines SOA APIs via _define_soa_api_handlers())
+            # (called automatically in super().initialize() if orchestrator defines SOA APIs via _define_soa_api_handlers())
+            # The MCP server should be initialized by now (via super().initialize())
             
-            self.mcp_server = ContentAnalysisMCPServer(
-                orchestrator=self,
-                di_container=self.di_container
-            )
-            # MCP server registers tools in __init__, ready to use
-            self.logger.info(f"✅ {self.orchestrator_name} MCP Server initialized")
+            if not hasattr(self, 'mcp_server') or not self.mcp_server:
+                self.logger.warning(
+                    f"⚠️ MCP Server not initialized for {self.orchestrator_name}. "
+                    f"Ensure _initialize_mcp_server() is called or check if SOA APIs are defined."
+                )
             
             # Register with Curator (Phase 2 pattern with CapabilityDefinition structure)
+            # NOTE: SOA APIs and MCP tools are now sourced from MCP Server (single source of truth)
+            soa_apis_from_mcp = await self.get_soa_apis() if hasattr(self, 'mcp_server') and self.mcp_server else {}
+            soa_api_names = list(soa_apis_from_mcp.keys())
+            mcp_tool_names = [f"content_{name}" for name in soa_api_names]
+            
+            if not soa_api_names:
+                self.logger.warning(
+                    f"⚠️ No SOA APIs found from MCP Server for {self.orchestrator_name}. "
+                    f"Skipping Curator registration."
+                )
+                # Continue without Curator registration (non-critical)
+            else:
             await self._realm_service.register_with_curator(
                 capabilities=[
                     {
