@@ -30,10 +30,11 @@ class TestWebSocketGatewayIntegration:
     """Integration tests for WebSocket Gateway with real infrastructure."""
     
     @pytest.fixture
-    async def post_office_service(self, di_container):
+    async def post_office_service(self, di_container, public_works_foundation):
         """Get Post Office Service with WebSocket Gateway."""
         from backend.smart_city.services.post_office.post_office_service import PostOfficeService
         
+        # Public Works Foundation must be initialized first (Post Office needs messaging abstraction)
         service = PostOfficeService(di_container)
         await service.initialize()
         

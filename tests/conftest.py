@@ -325,10 +325,11 @@ async def post_office_service(di_container):
 
 
 @pytest.fixture
-async def traffic_cop_service(di_container):
+async def traffic_cop_service(di_container, public_works_foundation):
     """Traffic Cop Service fixture (for session validation)."""
     from backend.smart_city.services.traffic_cop.traffic_cop_service import TrafficCopService
     
+    # Public Works Foundation must be initialized first (Traffic Cop needs session abstraction)
     service = TrafficCopService(di_container)
     await service.initialize()
     

@@ -222,8 +222,78 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     "required": ["document_id"]
                 },
                 "description": "Analyze document (structure, metadata, entities)"
+            },
+            "get_parsed_file": {
+                "handler": self.get_parsed_file,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "parsed_file_id": {
+                            "type": "string",
+                            "description": "Parsed file ID (GCS file UUID)"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context"
+                        }
+                    },
+                    "required": ["parsed_file_id"]
+                },
+                "description": "Get parsed file data (wraps ContentSteward.get_parsed_file())"
             }
         }
+    
+    async def get_parsed_file(
+        self,
+        parsed_file_id: str,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get parsed file data (wraps ContentSteward.get_parsed_file()).
+        
+        This method wraps ContentSteward.get_parsed_file() to expose it as an SOA API
+        for agents to access via MCP tools.
+        
+        Args:
+            parsed_file_id: Parsed file ID (GCS file UUID)
+            user_context: Optional user context
+        
+        Returns:
+            Parsed file data with metadata
+        """
+        try:
+            # Get Content Steward API
+            content_steward = await self.get_content_steward_api()
+            if not content_steward:
+                return {
+                    "success": False,
+                    "error": "Content Steward not available",
+                    "parsed_file_id": parsed_file_id
+                }
+            
+            # Call ContentSteward.get_parsed_file()
+            parsed_file = await content_steward.get_parsed_file(parsed_file_id, user_context)
+            
+            if not parsed_file:
+                return {
+                    "success": False,
+                    "error": "Parsed file not found",
+                    "parsed_file_id": parsed_file_id
+                }
+            
+            return {
+                "success": True,
+                "parsed_file_id": parsed_file_id,
+                **parsed_file
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Get parsed file failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "parsed_file_id": parsed_file_id
+            }
     
     async def _initialize_mcp_server(self):
         """
