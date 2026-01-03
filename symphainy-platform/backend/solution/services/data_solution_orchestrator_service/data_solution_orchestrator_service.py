@@ -1657,6 +1657,13 @@ class DataSolutionOrchestratorService(OrchestratorBase):
         Returns:
             Dict with response data
         """
+        # Start telemetry tracking
+        await self._realm_service.log_operation_with_telemetry(
+            "handle_request_start",
+            success=True,
+            details={"method": method, "path": path}
+        )
+        
         try:
             # Merge user_context from params if provided
             if not user_context:
@@ -1746,6 +1753,12 @@ class DataSolutionOrchestratorService(OrchestratorBase):
                 )
             
             else:
+                # Route not found - log and return
+                await self._realm_service.log_operation_with_telemetry(
+                    "handle_request_route_not_found",
+                    success=False,
+                    details={"method": method, "path": path}
+                )
                 return {
                     "success": False,
                     "error": "Route not found",
@@ -1755,11 +1768,46 @@ class DataSolutionOrchestratorService(OrchestratorBase):
                 }
                 
         except Exception as e:
+            # Error handling with audit
+            await self._realm_service.handle_error_with_audit(
+                e,
+                "handle_request",
+                {
+                    "method": method,
+                    "path": path,
+                    "error_type": type(e).__name__
+                }
+            )
+            
+            # Log failure
+            await self._realm_service.log_operation_with_telemetry(
+                "handle_request_failed",
+                success=False,
+                details={
+                    "method": method,
+                    "path": path,
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                }
+            )
+            
+            # Record health metric
+            await self._realm_service.record_health_metric(
+                "handle_request_success",
+                0.0,
+                metadata={
+                    "method": method,
+                    "path": path,
+                    "error_type": type(e).__name__
+                }
+            )
+            
             self.logger.error(f"❌ Request handling failed: {e}")
-            import traceback
-            self.logger.error(f"   Traceback: {traceback.format_exc()}")
             return {
                 "success": False,
-                "error": str(e)
+                "error": str(e),
+                "error_code": type(e).__name__,
+                "error_type": "unexpected_error",
+                "message": f"Request handling failed: {str(e)}"
             }
 

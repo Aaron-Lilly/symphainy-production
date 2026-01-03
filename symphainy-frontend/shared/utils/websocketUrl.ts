@@ -27,7 +27,7 @@ export function getWebSocketBaseURL(): string {
 
 /**
  * Construct a full WebSocket URL for an endpoint
- * @param endpoint - The WebSocket endpoint path (e.g., '/api/ws/agent')
+ * @param endpoint - The WebSocket endpoint path (e.g., '/ws' - single Post Office Gateway endpoint)
  * @param sessionToken - Optional session token to include as query parameter
  * @returns Full WebSocket URL
  */

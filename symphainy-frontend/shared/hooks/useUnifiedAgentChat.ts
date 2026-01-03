@@ -382,12 +382,21 @@ export function useUnifiedAgentChat(
 
       setMessages(prev => [...prev, userMessage]);
 
-      // Send to backend in unified message format
+      // NEW: Send to backend in channel-based message format (Post Office Gateway)
+      // Channel format: "guide" or "pillar:content", "pillar:insights", etc.
+      const channel = agentType === 'guide' 
+        ? 'guide' 
+        : `pillar:${pillar || currentPillar || 'content'}`;
+      
       const messagePayload = {
-        agent_type: agentType,
-        pillar: pillar || currentPillar || undefined,
-        message: message,
-        conversation_id: activeConversationId
+        channel: channel,
+        intent: "chat", // Default intent, can be extended later
+        payload: {
+          message: message,
+          conversation_id: activeConversationId,
+          agent_type: agentType, // Keep for backward compatibility during transition
+          pillar: pillar || currentPillar || undefined
+        }
       };
 
       wsRef.current.send(JSON.stringify(messagePayload));

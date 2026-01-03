@@ -277,10 +277,22 @@ class WebSocketGatewayService(SmartCityRoleBase):
             if connection_id in self.connection_metadata:
                 self.connection_metadata[connection_id]["last_activity"] = datetime.utcnow().isoformat()
             
-            # Extract channel (default to "guide" if not specified)
-            channel = data.get("channel", "guide")
+            # Extract channel from new format: { channel: "guide" | "pillar:content", intent: "...", payload: {...} }
+            # Or fallback to old format for transition: { agent_type: "...", pillar: "...", message: "..." }
+            channel = data.get("channel")
             
-            # Route to Redis channel
+            # If no channel, try to construct from old format
+            if not channel:
+                agent_type = data.get("agent_type", "guide")
+                pillar = data.get("pillar")
+                if agent_type == "guide":
+                    channel = "guide"
+                elif pillar:
+                    channel = f"pillar:{pillar}"
+                else:
+                    channel = "guide"  # Default fallback
+            
+            # Route to Redis channel (pass full data, gateway doesn't need to parse payload)
             await self._route_to_channel(connection_id, channel, data)
             
         except json.JSONDecodeError as e:

@@ -1843,6 +1843,13 @@ class OperationsSolutionOrchestratorService(OrchestratorBase):
         Returns:
             Response dictionary
         """
+        # Start telemetry tracking
+        await self._realm_service.log_operation_with_telemetry(
+            "handle_request_start",
+            success=True,
+            details={"method": method, "path": path}
+        )
+        
         try:
             # Route to appropriate method based on path
             if path == "workflow-from-sop" and method == "POST":
@@ -1915,13 +1922,49 @@ class OperationsSolutionOrchestratorService(OrchestratorBase):
                 }
                 
         except Exception as e:
+            # Error handling with audit
+            await self._realm_service.handle_error_with_audit(
+                e,
+                "handle_request",
+                {
+                    "method": method,
+                    "path": path,
+                    "error_type": type(e).__name__,
+                    "workflow_id": user_context.get("workflow_id") if user_context else None
+                }
+            )
+            
+            # Log failure
+            await self._realm_service.log_operation_with_telemetry(
+                "handle_request_failed",
+                success=False,
+                details={
+                    "method": method,
+                    "path": path,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "workflow_id": user_context.get("workflow_id") if user_context else None
+                }
+            )
+            
+            # Record health metric
+            await self._realm_service.record_health_metric(
+                "handle_request_success",
+                0.0,
+                metadata={
+                    "method": method,
+                    "path": path,
+                    "error_type": type(e).__name__
+                }
+            )
+            
             self.logger.error(f"❌ Request handling failed: {e}")
-            import traceback
-            self.logger.error(f"   Traceback: {traceback.format_exc()}")
-            await self._realm_service.handle_error_with_audit(e, "handle_request")
             return {
                 "success": False,
                 "error": str(e),
+                "error_code": type(e).__name__,
+                "error_type": "unexpected_error",
+                "message": f"Request handling failed: {str(e)}",
                 "workflow_id": user_context.get("workflow_id") if user_context else None
             }
 

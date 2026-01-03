@@ -135,18 +135,31 @@ class BusinessOutcomesSolutionOrchestratorService(OrchestratorBase):
             return True
             
         except Exception as e:
-            self.logger.error(f"❌ Failed to initialize Business Outcomes Solution Orchestrator Service: {e}")
-            import traceback
-            self.logger.error(f"   Traceback: {traceback.format_exc()}")
+            # Error handling with audit
+            await self._realm_service.handle_error_with_audit(
+                e,
+                "initialize",
+                {
+                    "service": "BusinessOutcomesSolutionOrchestratorService",
+                    "error_type": type(e).__name__
+                }
+            )
             
-            # Record failure in telemetry (via _realm_service delegation)
+            # Log failure
             await self._realm_service.log_operation_with_telemetry(
                 "business_outcomes_solution_orchestrator_initialize_complete",
                 success=False,
-                details={"error": str(e)}
+                details={"error": str(e), "error_type": type(e).__name__}
             )
             
-            await self._realm_service.handle_error_with_audit(e, "initialize")
+            # Record health metric
+            await self._realm_service.record_health_metric(
+                "business_outcomes_solution_orchestrator_initialized",
+                0.0,
+                metadata={"error_type": type(e).__name__}
+            )
+            
+            self.logger.error(f"❌ Failed to initialize Business Outcomes Solution Orchestrator Service: {e}")
             return False
     
     async def _register_with_curator(self):

@@ -100,7 +100,8 @@ export function useExperienceChat({ sessionToken, onContextUpdate }: UseExperien
     const { getWebSocketUrl } = require('@/shared/config/api-config');
     const API_URL = getWebSocketUrl(sessionToken).replace(/\?.*$/, '').replace(/^ws/, 'http'); // Convert back to HTTP for base URL
     
-    const specialistWs = new WebSocket(`${API_URL.replace('http', 'ws')}/api/ws/agent-wise-chat`);
+    // NEW: Single WebSocket endpoint via Post Office Gateway (channel routing via message format)
+    const specialistWs = new WebSocket(`${API_URL.replace('http', 'ws')}/ws${sessionToken ? `?session_token=${sessionToken}` : ''}`);
     
     specialistWs.onopen = () => {
       console.log('Specialist WebSocket connected');
