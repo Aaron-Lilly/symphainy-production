@@ -205,6 +205,137 @@ class InsightsJourneyOrchestrator(OrchestratorBase):
         
         return self._structured_analysis_workflow
     
+    # ============================================================================
+    # UNIFIED SOA API → MCP TOOL PATTERN (Phase 3.2.5)
+    # ============================================================================
+    
+    def _define_soa_api_handlers(self) -> Dict[str, Any]:
+        """
+        Define Insights Journey Orchestrator SOA APIs.
+        
+        UNIFIED PATTERN: MCP Server automatically registers these as MCP Tools.
+        
+        Returns:
+            Dict of SOA API definitions with handlers, input schemas, and descriptions
+        """
+        return {
+            "execute_data_mapping_workflow": {
+                "handler": self.execute_data_mapping_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "source_file_id": {
+                            "type": "string",
+                            "description": "Source file identifier"
+                        },
+                        "target_file_id": {
+                            "type": "string",
+                            "description": "Target file identifier"
+                        },
+                        "mapping_options": {
+                            "type": "object",
+                            "description": "Optional mapping configuration",
+                            "default": None
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id, session_id)"
+                        }
+                    },
+                    "required": ["source_file_id", "target_file_id"]
+                },
+                "description": "Execute data mapping workflow (source → target)"
+            },
+            "execute_analysis_workflow": {
+                "handler": self.execute_analysis_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_id": {
+                            "type": "string",
+                            "description": "File identifier"
+                        },
+                        "analysis_type": {
+                            "type": "string",
+                            "description": "Type of analysis",
+                            "enum": ["eda", "vark", "business_summary", "unstructured"]
+                        },
+                        "analysis_options": {
+                            "type": "object",
+                            "description": "Optional analysis configuration",
+                            "default": None
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id, session_id)"
+                        }
+                    },
+                    "required": ["file_id", "analysis_type"]
+                },
+                "description": "Execute analysis workflow (EDA, VARK, business summary, unstructured)"
+            },
+            "execute_visualization_workflow": {
+                "handler": self.execute_visualization_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "content_id": {
+                            "type": "string",
+                            "description": "Content metadata identifier"
+                        },
+                        "visualization_options": {
+                            "type": "object",
+                            "description": "Optional visualization configuration",
+                            "default": None
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id)"
+                        }
+                    },
+                    "required": ["content_id"]
+                },
+                "description": "Execute visualization workflow"
+            },
+            "query_insights_with_data_mash": {
+                "handler": self.query_insights_with_data_mash,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Query string"
+                        },
+                        "query_options": {
+                            "type": "object",
+                            "description": "Optional query configuration",
+                            "default": None
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context"
+                        }
+                    },
+                    "required": ["query"]
+                },
+                "description": "Query insights with data mash (client, semantic, platform data)"
+            }
+        }
+    
+    async def _initialize_mcp_server(self):
+        """
+        Initialize Insights Realm MCP Server (unified pattern).
+        
+        MCP Server automatically registers tools from _define_soa_api_handlers().
+        """
+        from .mcp_server.insights_mcp_server import InsightsMCPServer
+        
+        self.mcp_server = InsightsMCPServer(
+            orchestrator=self,
+            di_container=self.di_container
+        )
+        await self.mcp_server.initialize()
+    
     async def initialize(self) -> bool:
         """
         Initialize Insights Journey Orchestrator.
