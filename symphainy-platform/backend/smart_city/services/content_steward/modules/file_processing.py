@@ -53,10 +53,11 @@ class FileProcessing:
                     if not permissions:
                         self.logger.error(f"❌ [FILE_PROCESSING] user_context has no permissions! user_context: {user_context}")
                         self.logger.error(f"❌ [FILE_PROCESSING] This indicates permissions were not propagated from Universal Pillar Router")
-                        # TEMPORARY: Allow if user_id is present (for E2E testing)
-                        # TODO: Fix permission propagation - permissions should come from Universal Pillar Router
-                        self.logger.warning(f"⚠️ [FILE_PROCESSING] TEMPORARY: Allowing upload without permissions (E2E testing) - user_id={user_id}")
-                        # Don't raise error - allow for testing
+                        # ✅ FIXED: Permission propagation is now handled in ContentJourneyOrchestrator.handle_content_upload()
+                        # If permissions are still missing, fail the request (zero-trust security)
+                        await self.service.record_health_metric("process_upload_missing_permissions", 1.0, {"content_type": content_type, "file_size": file_size})
+                        await self.service.log_operation_with_telemetry("process_upload_complete", success=False)
+                        raise PermissionError("Access denied: permissions not propagated from Universal Pillar Router")
                     else:
                         security = self.service.get_security()
                         if security:
@@ -77,14 +78,17 @@ class FileProcessing:
                                 self.logger.error(f"❌ Permission check error: {e}")
                                 raise PermissionError(f"Permission check failed: {str(e)}")
                 else:
-                    self.logger.warning(f"⚠️ [FILE_PROCESSING] user_context is not a dict: {type(user_context)}")
-                    # TEMPORARY: Allow for testing if user_context exists
-                    self.logger.warning(f"⚠️ [FILE_PROCESSING] TEMPORARY: Allowing upload with non-dict user_context (E2E testing)")
+                    self.logger.error(f"❌ [FILE_PROCESSING] user_context is not a dict: {type(user_context)}")
+                    # ✅ FIXED: Require proper user_context format (zero-trust security)
+                    await self.service.record_health_metric("process_upload_invalid_user_context", 1.0, {"content_type": content_type, "file_size": file_size})
+                    await self.service.log_operation_with_telemetry("process_upload_complete", success=False)
+                    raise ValueError(f"user_context must be a dict, got {type(user_context)}")
             else:
                 self.logger.error(f"❌ [FILE_PROCESSING] No user_context provided - permission check will fail")
-                # TEMPORARY: Allow for E2E testing
-                self.logger.warning(f"⚠️ [FILE_PROCESSING] TEMPORARY: Allowing upload without user_context (E2E testing)")
-                # Don't raise error - allow for testing
+                # ✅ FIXED: Require user_context (zero-trust security)
+                await self.service.record_health_metric("process_upload_missing_user_context", 1.0, {"content_type": content_type, "file_size": file_size})
+                await self.service.log_operation_with_telemetry("process_upload_complete", success=False)
+                raise ValueError("user_context is required for file upload (zero-trust security)")
             
             # Tenant validation (multi-tenant support)
             if user_context:

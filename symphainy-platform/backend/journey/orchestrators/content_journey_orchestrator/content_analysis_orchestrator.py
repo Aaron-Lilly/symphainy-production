@@ -826,12 +826,29 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 "size_bytes": len(file_data)
             }
             
+            # ✅ Get user context from request-scoped context (preserves permissions from Universal Pillar Router)
+            from utilities.security_authorization.request_context import get_request_user_context
+            ctx = get_request_user_context()
+            
             # Prepare user_context for Content Steward
+            # Merge request-scoped context (with permissions) with upload-specific fields
             user_context = {
                 "user_id": user_id,
                 "session_id": session_id,
                 "workflow_id": workflow_id
             }
+            
+            # Preserve permissions and other fields from request context
+            if ctx:
+                user_context.update({
+                    "tenant_id": ctx.get("tenant_id"),
+                    "permissions": ctx.get("permissions", []),
+                    "roles": ctx.get("roles", []),
+                    "email": ctx.get("email")
+                })
+                self.logger.debug(f"✅ [handle_content_upload] Using request context: user_id={ctx.get('user_id')}, tenant_id={ctx.get('tenant_id')}, permissions={ctx.get('permissions')}")
+            else:
+                self.logger.warning(f"⚠️ [handle_content_upload] No user context available in request context - permissions may be missing")
             
             upload_result = await content_steward.process_upload(file_data, file_type, metadata, user_context)
             

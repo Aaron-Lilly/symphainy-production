@@ -84,6 +84,8 @@ class SmartCityErrorHandler:
                 self.logger = logging.getLogger(f"ErrorHandler-{service_name}")
         except (ValueError, Exception) as e:
             # If logging service requires ConfigAdapter and it's not available yet, use standard logging
+            if not _LOGGING_SERVICE_AVAILABLE:
+                import logging
             self.logger = logging.getLogger(f"ErrorHandler-{service_name}")
             self.logger.warning(f"Using standard logging fallback (ConfigAdapter not available): {e}")
 
@@ -274,6 +276,7 @@ def get_error_handler(service_name: str, config=None) -> SmartCityErrorHandler:
     return SmartCityErrorHandler(service_name)
 
 # Default error handler (lazy initialization to avoid requiring ConfigAdapter at module import time)
+# DO NOT initialize at module import time - causes startup failures
 _default_error_handler = None
 
 def get_default_error_handler() -> SmartCityErrorHandler:
@@ -283,12 +286,15 @@ def get_default_error_handler() -> SmartCityErrorHandler:
         _default_error_handler = get_error_handler("mcp_platform")
     return _default_error_handler
 
-# For backward compatibility, provide default_error_handler as a property
-# But don't initialize it at module import time
-@property
-def default_error_handler():
-    """Default error handler (lazy access)."""
-    return get_default_error_handler()
+# For backward compatibility, create a lazy wrapper
+class _LazyDefaultErrorHandler:
+    """Lazy wrapper for default error handler to avoid module import initialization."""
+    def __call__(self):
+        return get_default_error_handler()
+    def __getattr__(self, name):
+        return getattr(get_default_error_handler(), name)
+
+default_error_handler = _LazyDefaultErrorHandler()
 
 
 
