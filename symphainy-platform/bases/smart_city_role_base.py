@@ -177,14 +177,40 @@ class SmartCityRoleBase(SmartCityRoleProtocol, UtilityAccessMixin, Infrastructur
         """
         Get all exposed SOA APIs.
         
-        NOTE: Services MUST override this method to return actual SOA APIs.
-        This is a default placeholder implementation that should be overridden.
+        Smart City services can expose SOA APIs in two ways:
+        1. **SoaMcp Module Pattern (Recommended):** The `SoaMcp` micro-module sets `self.soa_apis`
+           during `initialize_soa_api_exposure()`. This method automatically returns it.
+        2. **Override Pattern:** Services can override this method to return custom SOA API definitions.
         
         Returns:
-            Dict containing SOA API definitions (services should override)
+            Dict containing SOA API definitions. Format:
+            {
+                "api_name": {
+                    "endpoint": "/api/service/endpoint",
+                    "method": "POST",
+                    "description": "API description",
+                    "parameters": ["param1", "param2"]
+                },
+                ...
+            }
+        
+        Note:
+            If neither pattern is used, returns a placeholder dict. Services should use one of the patterns
+            to properly expose their SOA APIs for realm consumption.
         """
-        # Default placeholder - services must override
-        return {"status": "soa_apis_placeholder"}
+        # Check if SoaMcp module has set self.soa_apis
+        if hasattr(self, 'soa_apis') and isinstance(self.soa_apis, dict) and len(self.soa_apis) > 0:
+            return self.soa_apis
+        
+        # If service overrides this method, it will be called instead
+        # Otherwise, log a warning and return placeholder
+        if self.logger:
+            self.logger.warning(
+                f"⚠️ {self.service_name} has not exposed SOA APIs. "
+                f"Either use SoaMcp module pattern (sets self.soa_apis) or override get_soa_apis() method."
+            )
+        
+        return {"status": "soa_apis_placeholder", "message": "Service has not exposed SOA APIs"}
     
     async def orchestrate_foundation_capabilities(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Orchestrate foundational capabilities into platform services."""
