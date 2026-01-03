@@ -416,6 +416,9 @@ class WebSocketGatewayService(SmartCityRoleBase):
             # Parse message
             data = json.loads(message)
             
+            if self.logger:
+                self.logger.debug(f"📨 Received message from {connection_id}: {data}")
+            
             # Update last activity in Redis
             if self.connection_registry:
                 await self.connection_registry.update_connection_activity(connection_id)
@@ -434,6 +437,9 @@ class WebSocketGatewayService(SmartCityRoleBase):
                     channel = f"pillar:{pillar}"
                 else:
                     channel = "guide"  # Default fallback
+            
+            if self.logger:
+                self.logger.debug(f"📤 Routing message from {connection_id} to channel {channel}")
             
             # Route to Redis channel (pass full data, gateway doesn't need to parse payload)
             await self._route_to_channel(connection_id, channel, data)
@@ -459,6 +465,21 @@ class WebSocketGatewayService(SmartCityRoleBase):
                 "timestamp": datetime.utcnow().isoformat(),
                 "gateway_instance": self.instance_id
             }
+            
+            # IMPORTANT: Track channel subscription FIRST, before publishing
+            # This ensures subscriptions are recorded even if publishing fails or is queued
+            if self.connection_registry:
+                if self.logger:
+                    self.logger.debug(f"📝 About to add channel subscription: connection_id={connection_id}, channel={channel}")
+                subscription_result = await self.connection_registry.add_channel_subscription(connection_id, channel)
+                if self.logger:
+                    if subscription_result:
+                        self.logger.debug(f"✅ Channel subscription added successfully: {connection_id} -> {channel}")
+                    else:
+                        self.logger.warning(f"⚠️ Failed to add channel subscription: {connection_id} -> {channel}")
+            else:
+                if self.logger:
+                    self.logger.warning(f"⚠️ Connection registry not available, cannot track channel subscription")
             
             # Phase 3: Use backpressure manager for publishing
             if self.backpressure_manager:
@@ -491,10 +512,6 @@ class WebSocketGatewayService(SmartCityRoleBase):
                             redis_channel,
                             message_with_metadata
                         )
-            
-            # Track channel subscription in Redis
-            if self.connection_registry:
-                await self.connection_registry.add_channel_subscription(connection_id, channel)
             
             if self.logger:
                 self.logger.debug(

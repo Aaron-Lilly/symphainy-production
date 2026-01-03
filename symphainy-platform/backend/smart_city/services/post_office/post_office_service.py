@@ -420,17 +420,23 @@ class PostOfficeService(SmartCityRoleBase, PostOfficeServiceProtocol):
                 "timestamp": datetime.utcnow().isoformat()
             }
             
-            # Publish to Redis
-            if hasattr(self.messaging_abstraction, 'publish'):
-                await self.messaging_abstraction.publish(
-                    redis_channel,
-                    json.dumps(message_with_metadata)
-                )
-            elif hasattr(self.messaging_abstraction, 'send_message'):
-                await self.messaging_abstraction.send_message(
-                    redis_channel,
-                    message_with_metadata
-                )
+            # Publish to Redis using direct Redis client (pub/sub)
+            # The messaging abstraction doesn't have a publish method for pub/sub
+            # We need to use the Redis client directly from the messaging adapter
+            if hasattr(self.messaging_abstraction, 'messaging_adapter'):
+                if hasattr(self.messaging_abstraction.messaging_adapter, 'redis_client'):
+                    redis_client = self.messaging_abstraction.messaging_adapter.redis_client
+                    # Use Redis PUBLISH command for pub/sub
+                    import inspect
+                    publish_method = getattr(redis_client, 'publish', None)
+                    if publish_method and inspect.iscoroutinefunction(publish_method):
+                        await redis_client.publish(redis_channel, json.dumps(message_with_metadata))
+                    else:
+                        redis_client.publish(redis_channel, json.dumps(message_with_metadata))
+                else:
+                    raise Exception("Redis client not available in messaging adapter")
+            else:
+                raise Exception("Messaging adapter not available")
             
             return {
                 "success": True,

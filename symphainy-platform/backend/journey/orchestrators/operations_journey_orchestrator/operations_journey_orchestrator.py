@@ -931,6 +931,20 @@ class OperationsJourneyOrchestrator(OrchestratorBase):
                 "service_name": "SOPBuilderService"
             }
     
+    async def _initialize_mcp_server(self):
+        """
+        Initialize Operations Realm MCP Server (unified pattern).
+        
+        MCP Server automatically registers tools from _define_soa_api_handlers().
+        """
+        from .mcp_server.operations_mcp_server import OperationsMCPServer
+        
+        self.mcp_server = OperationsMCPServer(
+            orchestrator=self,
+            di_container=self.di_container
+        )
+        await self.mcp_server.initialize()
+    
     async def initialize(self) -> bool:
         """
         Initialize Operations Journey Orchestrator.

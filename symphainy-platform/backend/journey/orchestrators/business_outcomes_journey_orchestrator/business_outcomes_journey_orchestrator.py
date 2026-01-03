@@ -659,5 +659,79 @@ class BusinessOutcomesJourneyOrchestrator(OrchestratorBase):
                 "success": False,
                 "error": str(e)
             }
+    
+    # ============================================================================
+    # UNIFIED SOA API → MCP TOOL PATTERN (Phase 3.2.5)
+    # ============================================================================
+    
+    def _define_soa_api_handlers(self) -> Dict[str, Any]:
+        """
+        Define Business Outcomes Journey Orchestrator SOA APIs.
+        
+        UNIFIED PATTERN: MCP Server automatically registers these as MCP Tools.
+        
+        Returns:
+            Dict of SOA API definitions with handlers, input schemas, and descriptions
+        """
+        return {
+            "execute_roadmap_generation_workflow": {
+                "handler": self.execute_roadmap_generation_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "pillar_summaries": {
+                            "type": "object",
+                            "description": "Compiled summaries from all pillars"
+                        },
+                        "roadmap_options": {
+                            "type": "object",
+                            "description": "Optional roadmap generation options"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes solution_context if available)"
+                        }
+                    },
+                    "required": ["pillar_summaries"]
+                },
+                "description": "Execute roadmap generation with solution context and optional Saga guarantees"
+            },
+            "execute_poc_proposal_generation_workflow": {
+                "handler": self.execute_poc_proposal_generation_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "pillar_summaries": {
+                            "type": "object",
+                            "description": "Compiled summaries from all pillars"
+                        },
+                        "poc_options": {
+                            "type": "object",
+                            "description": "Optional POC proposal generation options"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes solution_context if available)"
+                        }
+                    },
+                    "required": ["pillar_summaries"]
+                },
+                "description": "Execute POC proposal generation with solution context"
+            }
+        }
+    
+    async def _initialize_mcp_server(self):
+        """
+        Initialize Business Outcomes Realm MCP Server (unified pattern).
+        
+        MCP Server automatically registers tools from _define_soa_api_handlers().
+        """
+        from .mcp_server.business_outcomes_mcp_server import BusinessOutcomesMCPServer
+        
+        self.mcp_server = BusinessOutcomesMCPServer(
+            orchestrator=self,
+            di_container=self.di_container
+        )
+        await self.mcp_server.initialize()
 
 

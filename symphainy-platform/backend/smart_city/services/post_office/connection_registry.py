@@ -39,6 +39,25 @@ class ConnectionRegistry:
         self.messaging_abstraction = messaging_abstraction
         self.logger = logger
         
+        # Get Redis client from messaging abstraction's adapter
+        # messaging_abstraction -> messaging_adapter -> redis_client
+        self.redis_client = None
+        if hasattr(messaging_abstraction, 'messaging_adapter'):
+            if hasattr(messaging_abstraction.messaging_adapter, 'redis_client'):
+                self.redis_client = messaging_abstraction.messaging_adapter.redis_client
+        
+        if not self.redis_client:
+            raise ValueError("Redis client not available from messaging abstraction")
+        
+        # Verify redis client is async (redis.asyncio.Redis)
+        # If it's not async, we need to handle it differently
+        import inspect
+        if not inspect.iscoroutinefunction(getattr(self.redis_client, 'smembers', None)):
+            # If smembers is not async, it might be a sync client wrapped
+            # Try to get the actual async client or use a wrapper
+            self.logger.warning("⚠️ Redis client may not be async - checking methods")
+            # For now, assume it's async and let errors surface
+        
         # Default TTL for connections (1 hour, extendable via heartbeat)
         self.default_ttl = 3600  # seconds
         
@@ -81,55 +100,79 @@ class ConnectionRegistry:
                 "metadata": json.dumps(metadata) if isinstance(metadata, dict) else metadata
             }
             
-            # Store in Redis (using messaging abstraction)
-            if hasattr(self.messaging_abstraction, 'set'):
-                # Direct Redis set
-                await self.messaging_abstraction.set(
+            # Store in Redis using direct Redis client
+            # Use hset for hash structure (better for connection metadata)
+            import inspect
+            hset_method = getattr(self.redis_client, 'hset', None)
+            if hset_method and inspect.iscoroutinefunction(hset_method):
+                await self.redis_client.hset(
                     connection_key,
-                    json.dumps(connection_data),
-                    ex=self.default_ttl
-                )
-            elif hasattr(self.messaging_abstraction, 'store'):
-                # Abstraction store method
-                await self.messaging_abstraction.store(
-                    connection_key,
-                    connection_data,
-                    ttl=self.default_ttl
+                    mapping=connection_data
                 )
             else:
-                # Fallback: Use hset for hash structure
-                if hasattr(self.messaging_abstraction, 'hset'):
-                    await self.messaging_abstraction.hset(
-                        connection_key,
-                        mapping=connection_data
-                    )
-                    await self.messaging_abstraction.expire(connection_key, self.default_ttl)
+                self.redis_client.hset(
+                    connection_key,
+                    mapping=connection_data
+                )
+            
+            expire_method = getattr(self.redis_client, 'expire', None)
+            if expire_method and inspect.iscoroutinefunction(expire_method):
+                await self.redis_client.expire(connection_key, self.default_ttl)
+            else:
+                self.redis_client.expire(connection_key, self.default_ttl)
             
             # Add to channel index
             channel_key = f"websocket:channel:{channel}:connections"
-            if hasattr(self.messaging_abstraction, 'sadd'):
-                await self.messaging_abstraction.sadd(channel_key, connection_id)
-                await self.messaging_abstraction.expire(channel_key, self.default_ttl)
+            sadd_method = getattr(self.redis_client, 'sadd', None)
+            if sadd_method and inspect.iscoroutinefunction(sadd_method):
+                await self.redis_client.sadd(channel_key, connection_id)
+            else:
+                self.redis_client.sadd(channel_key, connection_id)
+            
+            if expire_method and inspect.iscoroutinefunction(expire_method):
+                await self.redis_client.expire(channel_key, self.default_ttl)
+            else:
+                self.redis_client.expire(channel_key, self.default_ttl)
             
             # Add to user index (for session management)
             user_id = metadata.get("user_id")
             if user_id:
                 user_key = f"websocket:user:{user_id}:connections"
-                if hasattr(self.messaging_abstraction, 'sadd'):
-                    await self.messaging_abstraction.sadd(user_key, connection_id)
-                    await self.messaging_abstraction.expire(user_key, self.default_ttl)
+                if sadd_method and inspect.iscoroutinefunction(sadd_method):
+                    await self.redis_client.sadd(user_key, connection_id)
+                else:
+                    self.redis_client.sadd(user_key, connection_id)
+                
+                if expire_method and inspect.iscoroutinefunction(expire_method):
+                    await self.redis_client.expire(user_key, self.default_ttl)
+                else:
+                    self.redis_client.expire(user_key, self.default_ttl)
             
             # Add to gateway instance index
             gateway_key = f"websocket:gateway:{gateway_instance_id}:connections"
-            if hasattr(self.messaging_abstraction, 'sadd'):
-                await self.messaging_abstraction.sadd(gateway_key, connection_id)
-                await self.messaging_abstraction.expire(gateway_key, self.default_ttl)
+            if sadd_method and inspect.iscoroutinefunction(sadd_method):
+                await self.redis_client.sadd(gateway_key, connection_id)
+            else:
+                self.redis_client.sadd(gateway_key, connection_id)
             
-            self.logger.debug(f"✅ Connection registered in Redis: {connection_id}")
+            if expire_method and inspect.iscoroutinefunction(expire_method):
+                await self.redis_client.expire(gateway_key, self.default_ttl)
+            else:
+                self.redis_client.expire(gateway_key, self.default_ttl)
+            
+            # Verify registration was successful
+            verify_conn = await self.get_connection(connection_id)
+            if verify_conn:
+                self.logger.info(f"✅ Connection registered in Redis: {connection_id} (verified)")
+            else:
+                self.logger.warning(f"⚠️ Connection registration may have failed: {connection_id} (not found in verification)")
+            
             return True
             
         except Exception as e:
             self.logger.error(f"❌ Failed to register connection {connection_id}: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def get_connection(self, connection_id: str) -> Optional[Dict[str, Any]]:
@@ -145,14 +188,20 @@ class ConnectionRegistry:
         try:
             connection_key = f"websocket:connection:{connection_id}"
             
-            # Get from Redis
-            data = None
-            if hasattr(self.messaging_abstraction, 'get'):
-                raw_data = await self.messaging_abstraction.get(connection_key)
-                if raw_data:
-                    data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
-            elif hasattr(self.messaging_abstraction, 'hgetall'):
-                data = await self.messaging_abstraction.hgetall(connection_key)
+            # Check if redis_client is async
+            import inspect
+            hgetall_method = getattr(self.redis_client, 'hgetall', None)
+            if hgetall_method and inspect.iscoroutinefunction(hgetall_method):
+                data = await self.redis_client.hgetall(connection_key)
+            else:
+                # Fallback: try calling directly (might be sync)
+                data = self.redis_client.hgetall(connection_key)
+            
+            # Convert bytes to strings if needed (redis-py returns bytes)
+            if data:
+                data = {k.decode('utf-8') if isinstance(k, bytes) else k: 
+                       v.decode('utf-8') if isinstance(v, bytes) else v 
+                       for k, v in data.items()}
             
             if not data:
                 return None
@@ -168,6 +217,8 @@ class ConnectionRegistry:
             
         except Exception as e:
             self.logger.error(f"❌ Failed to get connection {connection_id}: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return None
     
     async def unregister_connection(self, connection_id: str) -> bool:
@@ -190,8 +241,7 @@ class ConnectionRegistry:
             channel = conn.get("channel")
             if channel:
                 channel_key = f"websocket:channel:{channel}:connections"
-                if hasattr(self.messaging_abstraction, 'srem'):
-                    await self.messaging_abstraction.srem(channel_key, connection_id)
+                await self.redis_client.srem(channel_key, connection_id)
             
             # Remove from user index
             metadata = conn.get("metadata", {})
@@ -204,22 +254,22 @@ class ConnectionRegistry:
             user_id = metadata.get("user_id")
             if user_id:
                 user_key = f"websocket:user:{user_id}:connections"
-                if hasattr(self.messaging_abstraction, 'srem'):
-                    await self.messaging_abstraction.srem(user_key, connection_id)
+                await self.redis_client.srem(user_key, connection_id)
             
             # Remove from gateway instance index
             gateway_instance_id = conn.get("gateway_instance_id")
             if gateway_instance_id:
                 gateway_key = f"websocket:gateway:{gateway_instance_id}:connections"
-                if hasattr(self.messaging_abstraction, 'srem'):
-                    await self.messaging_abstraction.srem(gateway_key, connection_id)
+                await self.redis_client.srem(gateway_key, connection_id)
             
             # Delete connection record
             connection_key = f"websocket:connection:{connection_id}"
-            if hasattr(self.messaging_abstraction, 'delete'):
-                await self.messaging_abstraction.delete(connection_key)
-            elif hasattr(self.messaging_abstraction, 'del'):
-                await self.messaging_abstraction.del_(connection_key)
+            import inspect
+            delete_method = getattr(self.redis_client, 'delete', None)
+            if delete_method and inspect.iscoroutinefunction(delete_method):
+                await self.redis_client.delete(connection_key)
+            else:
+                self.redis_client.delete(connection_key)
             
             self.logger.debug(f"✅ Connection unregistered from Redis: {connection_id}")
             return True
@@ -233,17 +283,28 @@ class ConnectionRegistry:
         try:
             connection_key = f"websocket:connection:{connection_id}"
             
-            if hasattr(self.messaging_abstraction, 'hset'):
-                await self.messaging_abstraction.hset(
+            import inspect
+            hset_method = getattr(self.redis_client, 'hset', None)
+            if hset_method and inspect.iscoroutinefunction(hset_method):
+                await self.redis_client.hset(
                     connection_key,
                     "last_activity",
                     datetime.utcnow().isoformat()
                 )
-                # Extend TTL
-                await self.messaging_abstraction.expire(connection_key, self.default_ttl)
-                return True
+            else:
+                self.redis_client.hset(
+                    connection_key,
+                    "last_activity",
+                    datetime.utcnow().isoformat()
+                )
             
-            return False
+            # Extend TTL
+            expire_method = getattr(self.redis_client, 'expire', None)
+            if expire_method and inspect.iscoroutinefunction(expire_method):
+                await self.redis_client.expire(connection_key, self.default_ttl)
+            else:
+                self.redis_client.expire(connection_key, self.default_ttl)
+            return True
             
         except Exception as e:
             self.logger.error(f"❌ Failed to update activity for {connection_id}: {e}")
@@ -254,17 +315,28 @@ class ConnectionRegistry:
         try:
             connection_key = f"websocket:connection:{connection_id}"
             
-            if hasattr(self.messaging_abstraction, 'hset'):
-                await self.messaging_abstraction.hset(
+            import inspect
+            hset_method = getattr(self.redis_client, 'hset', None)
+            if hset_method and inspect.iscoroutinefunction(hset_method):
+                await self.redis_client.hset(
                     connection_key,
                     "last_heartbeat",
                     datetime.utcnow().isoformat()
                 )
-                # Extend TTL
-                await self.messaging_abstraction.expire(connection_key, self.default_ttl)
-                return True
+            else:
+                self.redis_client.hset(
+                    connection_key,
+                    "last_heartbeat",
+                    datetime.utcnow().isoformat()
+                )
             
-            return False
+            # Extend TTL
+            expire_method = getattr(self.redis_client, 'expire', None)
+            if expire_method and inspect.iscoroutinefunction(expire_method):
+                await self.redis_client.expire(connection_key, self.default_ttl)
+            else:
+                self.redis_client.expire(connection_key, self.default_ttl)
+            return True
             
         except Exception as e:
             self.logger.error(f"❌ Failed to update heartbeat for {connection_id}: {e}")
@@ -275,14 +347,27 @@ class ConnectionRegistry:
         try:
             channel_key = f"websocket:channel:{channel}:connections"
             
-            if hasattr(self.messaging_abstraction, 'smembers'):
-                connections = await self.messaging_abstraction.smembers(channel_key)
-                return list(connections) if connections else []
+            # Check if redis_client is async (redis.asyncio.Redis)
+            # If smembers is a coroutine, await it; otherwise call it directly
+            import inspect
+            smembers_method = getattr(self.redis_client, 'smembers', None)
+            if smembers_method and inspect.iscoroutinefunction(smembers_method):
+                connections = await self.redis_client.smembers(channel_key)
+            else:
+                # Fallback: try calling directly (might be sync)
+                connections = self.redis_client.smembers(channel_key)
             
+            if connections:
+                # Convert bytes to strings if needed, and convert set to list
+                if isinstance(connections, set):
+                    connections = list(connections)
+                return [conn.decode('utf-8') if isinstance(conn, bytes) else str(conn) for conn in connections]
             return []
             
         except Exception as e:
             self.logger.error(f"❌ Failed to get connections for channel {channel}: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return []
     
     async def get_connections_by_user(self, user_id: str) -> List[str]:
@@ -290,10 +375,19 @@ class ConnectionRegistry:
         try:
             user_key = f"websocket:user:{user_id}:connections"
             
-            if hasattr(self.messaging_abstraction, 'smembers'):
-                connections = await self.messaging_abstraction.smembers(user_key)
-                return list(connections) if connections else []
+            # Check if redis_client is async
+            import inspect
+            smembers_method = getattr(self.redis_client, 'smembers', None)
+            if smembers_method and inspect.iscoroutinefunction(smembers_method):
+                connections = await self.redis_client.smembers(user_key)
+            else:
+                connections = self.redis_client.smembers(user_key)
             
+            if connections:
+                # Convert bytes to strings if needed, and convert set to list
+                if isinstance(connections, set):
+                    connections = list(connections)
+                return [conn.decode('utf-8') if isinstance(conn, bytes) else str(conn) for conn in connections]
             return []
             
         except Exception as e:
@@ -305,10 +399,19 @@ class ConnectionRegistry:
         try:
             gateway_key = f"websocket:gateway:{gateway_instance_id}:connections"
             
-            if hasattr(self.messaging_abstraction, 'smembers'):
-                connections = await self.messaging_abstraction.smembers(gateway_key)
-                return list(connections) if connections else []
+            # Check if redis_client is async
+            import inspect
+            smembers_method = getattr(self.redis_client, 'smembers', None)
+            if smembers_method and inspect.iscoroutinefunction(smembers_method):
+                connections = await self.redis_client.smembers(gateway_key)
+            else:
+                connections = self.redis_client.smembers(gateway_key)
             
+            if connections:
+                # Convert bytes to strings if needed, and convert set to list
+                if isinstance(connections, set):
+                    connections = list(connections)
+                return [conn.decode('utf-8') if isinstance(conn, bytes) else str(conn) for conn in connections]
             return []
             
         except Exception as e:
@@ -320,25 +423,66 @@ class ConnectionRegistry:
         try:
             channel_key = f"websocket:channel:{channel}:connections"
             
-            if hasattr(self.messaging_abstraction, 'sadd'):
-                await self.messaging_abstraction.sadd(channel_key, connection_id)
-                await self.messaging_abstraction.expire(channel_key, self.default_ttl)
-                
-                # Update connection's channel list
-                connection_key = f"websocket:connection:{connection_id}"
-                if hasattr(self.messaging_abstraction, 'hset'):
-                    await self.messaging_abstraction.hset(
-                        connection_key,
-                        "channel",
-                        channel
-                    )
-                
-                return True
+            self.logger.debug(f"📝 Adding channel subscription: connection_id={connection_id}, channel={channel}, channel_key={channel_key}")
             
-            return False
+            # Check if redis_client is async
+            import inspect
+            sadd_method = getattr(self.redis_client, 'sadd', None)
+            if sadd_method and inspect.iscoroutinefunction(sadd_method):
+                result = await self.redis_client.sadd(channel_key, connection_id)
+            else:
+                result = self.redis_client.sadd(channel_key, connection_id)
+            
+            self.logger.debug(f"✅ SADD result for {channel_key}: {result} (1=added, 0=already exists)")
+            
+            # Set TTL on channel key
+            expire_method = getattr(self.redis_client, 'expire', None)
+            if expire_method and inspect.iscoroutinefunction(expire_method):
+                await self.redis_client.expire(channel_key, self.default_ttl)
+            else:
+                self.redis_client.expire(channel_key, self.default_ttl)
+            
+            # Update connection's channel in connection record
+            connection_key = f"websocket:connection:{connection_id}"
+            hset_method = getattr(self.redis_client, 'hset', None)
+            if hset_method and inspect.iscoroutinefunction(hset_method):
+                await self.redis_client.hset(
+                    connection_key,
+                    "channel",
+                    channel
+                )
+            else:
+                self.redis_client.hset(
+                    connection_key,
+                    "channel",
+                    channel
+                )
+            
+            # Verify subscription was added
+            smembers_method = getattr(self.redis_client, 'smembers', None)
+            if smembers_method and inspect.iscoroutinefunction(smembers_method):
+                verify_connections = await self.redis_client.smembers(channel_key)
+            else:
+                verify_connections = self.redis_client.smembers(channel_key)
+            
+            if verify_connections:
+                if isinstance(verify_connections, set):
+                    verify_connections = list(verify_connections)
+                verify_list = [str(c) for c in verify_connections]
+                self.logger.debug(f"✅ Verified channel subscription: {channel_key} has {len(verify_list)} connections: {verify_list}")
+                if connection_id in verify_list or str(connection_id) in verify_list:
+                    self.logger.info(f"✅ Channel subscription confirmed: {connection_id} -> {channel}")
+                else:
+                    self.logger.warning(f"⚠️ Channel subscription not found in verification: {connection_id} not in {verify_list}")
+            else:
+                self.logger.warning(f"⚠️ Channel subscription set is empty after adding: {channel_key}")
+            
+            return True
             
         except Exception as e:
             self.logger.error(f"❌ Failed to add channel subscription: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def remove_channel_subscription(self, connection_id: str, channel: str) -> bool:
@@ -346,11 +490,13 @@ class ConnectionRegistry:
         try:
             channel_key = f"websocket:channel:{channel}:connections"
             
-            if hasattr(self.messaging_abstraction, 'srem'):
-                await self.messaging_abstraction.srem(channel_key, connection_id)
-                return True
-            
-            return False
+            import inspect
+            srem_method = getattr(self.redis_client, 'srem', None)
+            if srem_method and inspect.iscoroutinefunction(srem_method):
+                await self.redis_client.srem(channel_key, connection_id)
+            else:
+                self.redis_client.srem(channel_key, connection_id)
+            return True
             
         except Exception as e:
             self.logger.error(f"❌ Failed to remove channel subscription: {e}")
@@ -367,20 +513,32 @@ class ConnectionRegistry:
             
             # Count total connections (scan for all connection keys)
             # Note: This is expensive, use sparingly. In production, maintain counters.
-            if hasattr(self.messaging_abstraction, 'keys'):
-                pattern = "websocket:connection:*"
-                keys = await self.messaging_abstraction.keys(pattern)
-                stats["total"] = len(keys) if keys else 0
+            import inspect
+            pattern = "websocket:connection:*"
+            keys_method = getattr(self.redis_client, 'keys', None)
+            if keys_method and inspect.iscoroutinefunction(keys_method):
+                keys = await self.redis_client.keys(pattern)
+            else:
+                keys = self.redis_client.keys(pattern)
+            stats["total"] = len(keys) if keys else 0
             
             # Count by channel
-            if hasattr(self.messaging_abstraction, 'keys'):
-                channel_pattern = "websocket:channel:*:connections"
-                channel_keys = await self.messaging_abstraction.keys(channel_pattern)
-                for channel_key in (channel_keys or []):
-                    channel_name = channel_key.split(":")[2]  # Extract channel name
-                    if hasattr(self.messaging_abstraction, 'scard'):
-                        count = await self.messaging_abstraction.scard(channel_key)
-                        stats["by_channel"][channel_name] = count
+            channel_pattern = "websocket:channel:*:connections"
+            if keys_method and inspect.iscoroutinefunction(keys_method):
+                channel_keys = await self.redis_client.keys(channel_pattern)
+            else:
+                channel_keys = self.redis_client.keys(channel_pattern)
+            
+            scard_method = getattr(self.redis_client, 'scard', None)
+            for channel_key in (channel_keys or []):
+                # Convert bytes to string if needed
+                channel_key_str = channel_key.decode('utf-8') if isinstance(channel_key, bytes) else channel_key
+                channel_name = channel_key_str.split(":")[2]  # Extract channel name
+                if scard_method and inspect.iscoroutinefunction(scard_method):
+                    count = await self.redis_client.scard(channel_key_str)
+                else:
+                    count = self.redis_client.scard(channel_key_str)
+                stats["by_channel"][channel_name] = count
             
             return stats
             

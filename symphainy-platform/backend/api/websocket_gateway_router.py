@@ -118,3 +118,95 @@ async def websocket_gateway_health():
             "error": str(e)
         }
 
+
+@router.get("/test/websocket-gateway/connection/{connection_id}")
+async def test_get_connection(connection_id: str):
+    """
+    Test-only endpoint to get connection info from backend's gateway registry.
+    
+    This allows tests to query the backend container's connection registry
+    without creating a separate service instance.
+    """
+    try:
+        gateway_service = get_websocket_gateway_service()
+        
+        if not gateway_service.connection_registry:
+            return {
+                "success": False,
+                "error": "Connection registry not available"
+            }
+        
+        conn = await gateway_service.connection_registry.get_connection(connection_id)
+        
+        if conn is None:
+            return {
+                "success": False,
+                "error": "Connection not found",
+                "connection_id": connection_id
+            }
+        
+        return {
+            "success": True,
+            "connection": conn
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting connection {connection_id}: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.get("/test/websocket-gateway/channel/{channel}/connections")
+async def test_get_connections_by_channel(channel: str):
+    """
+    Test-only endpoint to get connections for a channel from backend's gateway registry.
+    """
+    try:
+        gateway_service = get_websocket_gateway_service()
+        
+        if not gateway_service.connection_registry:
+            return {
+                "success": False,
+                "error": "Connection registry not available"
+            }
+        
+        connections = await gateway_service.connection_registry.get_connections_by_channel(channel)
+        
+        return {
+            "success": True,
+            "channel": channel,
+            "connections": connections
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting connections for channel {channel}: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.get("/test/websocket-gateway/connection-count")
+async def test_get_connection_count():
+    """
+    Test-only endpoint to get connection count statistics from backend's gateway.
+    """
+    try:
+        gateway_service = get_websocket_gateway_service()
+        
+        stats = await gateway_service.get_connection_count()
+        
+        return {
+            "success": True,
+            "stats": stats
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting connection count: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
