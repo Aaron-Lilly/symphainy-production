@@ -53,10 +53,25 @@ class SmartCityLoggingService:
             ValueError: If config_adapter is not provided
         """
         if not config_adapter:
-            raise ValueError(
-                "ConfigAdapter is required for SmartCityLoggingService. "
-                "Pass config_adapter from Public Works Foundation."
-            )
+            # Create a minimal config adapter that uses os.getenv
+            # This allows SmartCityLoggingService to be initialized before Public Works Foundation
+            class _MinimalConfigAdapter:
+                def get(self, key: str, default: Any = None) -> Any:
+                    import os
+                    return os.getenv(key, default)
+                def get_bool(self, key: str, default: bool = False) -> bool:
+                    import os
+                    value = os.getenv(key, str(default))
+                    return value.lower() in ('true', '1', 'yes', 'on')
+                def get_int(self, key: str, default: int = 0) -> int:
+                    import os
+                    value = os.getenv(key, str(default))
+                    try:
+                        return int(value)
+                    except (ValueError, TypeError):
+                        return default
+            
+            config_adapter = _MinimalConfigAdapter()
         
         self.service_name = service_name
         self.config_adapter = config_adapter

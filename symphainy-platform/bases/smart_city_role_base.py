@@ -178,31 +178,34 @@ class SmartCityRoleBase(SmartCityRoleProtocol, UtilityAccessMixin, Infrastructur
         Get all exposed SOA APIs.
         
         UNIFIED PATTERN (Phase 3.2.5): Returns SOA APIs from MCP Server registration.
-        Smart City services should:
-        1. Define SOA APIs via _define_soa_api_handlers() (or SoaMcp module)
+        Smart City services MUST:
+        1. Define SOA APIs via _define_soa_api_handlers()
         2. Initialize MCP Server during initialize()
         3. MCP Server automatically registers tools from SOA APIs
         4. This method returns what MCP Server has registered (single source of truth)
         
         Returns:
             Dict containing SOA API definitions from MCP Server, or empty dict if not initialized
+        
+        Raises:
+            RuntimeError: If service defines SOA APIs but MCP Server not initialized
         """
-        # Use unified pattern from RealmServiceBase
         # Query MCP Server for registered tools (single source of truth)
         if hasattr(self, 'mcp_server') and self.mcp_server:
             if hasattr(self.mcp_server, 'get_soa_apis_from_tools'):
                 return await self.mcp_server.get_soa_apis_from_tools()
         
-        # MCP Server not initialized - return empty dict (service not ready)
-        # Legacy: If service has self.soa_apis set by SoaMcp module, return it for backward compatibility
-        if hasattr(self, 'soa_apis') and isinstance(self.soa_apis, dict) and len(self.soa_apis) > 0:
-            self.logger.warning(
-                f"⚠️ {self.service_name} using legacy SoaMcp module pattern. "
-                f"Migrate to unified MCP Server pattern (Phase 3.2.5)."
-            )
-            return self.soa_apis
+        # Check if service defines SOA APIs but MCP Server not initialized
+        if hasattr(self, '_define_soa_api_handlers'):
+            soa_apis = self._define_soa_api_handlers()
+            if soa_apis:
+                raise RuntimeError(
+                    f"{self.service_name} defines SOA APIs via _define_soa_api_handlers() "
+                    f"but MCP Server is not initialized. "
+                    f"Ensure MCP Server is initialized in initialize() method."
+                )
         
-        # No SOA APIs defined
+        # No SOA APIs defined - return empty dict
         return {}
     
     async def orchestrate_foundation_capabilities(self, request: Dict[str, Any]) -> Dict[str, Any]:

@@ -41,16 +41,23 @@ class AnthropicAdapter:
         elif config_adapter:
             self.api_key = config_adapter.get("ANTHROPIC_API_KEY")
             if not self.api_key:
-                raise ValueError(
+                # Make ANTHROPIC_API_KEY optional - adapter will be disabled if not available
+                self.api_key = None
+                self.logger.warning(
                     "ANTHROPIC_API_KEY not found in configuration. "
-                    "Either provide api_key parameter or ensure config contains ANTHROPIC_API_KEY."
+                    "Anthropic adapter will be disabled. "
+                    "Set ANTHROPIC_API_KEY to enable Anthropic LLM support."
                 )
         else:
-            raise ValueError(
-                "ConfigAdapter is required. "
-                "Pass config_adapter from Public Works Foundation. "
-                "Example: AnthropicAdapter(config_adapter=config_adapter)"
-            )
+            # ConfigAdapter not provided - use os.getenv as fallback
+            import os
+            self.api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not self.api_key:
+                self.logger.warning(
+                    "ANTHROPIC_API_KEY not found. "
+                    "Anthropic adapter will be disabled. "
+                    "Set ANTHROPIC_API_KEY to enable Anthropic LLM support."
+                )
         
         # Anthropic client (private - use wrapper methods instead)
         self._client = None

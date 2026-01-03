@@ -355,12 +355,23 @@ class PlatformOrchestrator:
             
             # Initialize Public Works Foundation
             public_works_foundation = PublicWorksFoundationService(di_container)
-            await public_works_foundation.initialize()
-            self.infrastructure_services["public_works_foundation"] = public_works_foundation
-            self.foundation_services["PublicWorksFoundationService"] = public_works_foundation
-            # CRITICAL: Update DI container's public_works_foundation reference to the initialized instance
-            di_container.public_works_foundation = public_works_foundation
-            self.logger.info("✅ Public Works Foundation initialized and linked to DI container")
+            try:
+                await public_works_foundation.initialize()
+                self.infrastructure_services["public_works_foundation"] = public_works_foundation
+                self.foundation_services["PublicWorksFoundationService"] = public_works_foundation
+                # CRITICAL: Update DI container's public_works_foundation reference to the initialized instance
+                di_container.public_works_foundation = public_works_foundation
+                self.logger.info("✅ Public Works Foundation initialized and linked to DI container")
+            except RuntimeError as e:
+                if "initialize_foundation() returned False" in str(e):
+                    # Some adapters may be optional - continue anyway
+                    self.logger.warning(f"⚠️ Public Works Foundation initialization had warnings: {e}")
+                    self.logger.warning("⚠️ Continuing startup - some adapters may be disabled")
+                    self.infrastructure_services["public_works_foundation"] = public_works_foundation
+                    self.foundation_services["PublicWorksFoundationService"] = public_works_foundation
+                    di_container.public_works_foundation = public_works_foundation
+                else:
+                    raise
             
             # Initialize Platform Gateway Foundation (depends on Public Works Foundation)
             platform_gateway_foundation = PlatformGatewayFoundationService(

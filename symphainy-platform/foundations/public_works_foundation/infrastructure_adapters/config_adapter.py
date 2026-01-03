@@ -220,12 +220,33 @@ class ConfigAdapter:
     
     def get_redis_config(self) -> Dict[str, Any]:
         """Raw Redis configuration retrieval - no business logic."""
+        # Parse REDIS_URL if available, otherwise use host/port
+        redis_url = self.get("REDIS_URL")
+        if redis_url:
+            # Parse redis://host:port or redis://host:port/db
+            import re
+            match = re.match(r'redis://([^:]+):(\d+)(?:/(\d+))?', redis_url)
+            if match:
+                host = match.group(1)
+                port = int(match.group(2))
+                db = int(match.group(3)) if match.group(3) else 0
+            else:
+                # Fallback to defaults
+                host = "symphainy-redis"  # Default to container name in Docker
+                port = 6379
+                db = 0
+        else:
+            # No REDIS_URL, use individual config or defaults
+            host = self.get("REDIS_HOST", "symphainy-redis")  # Default to container name in Docker
+            port = self.get_int("REDIS_PORT", 6379)
+            db = self.get_int("REDIS_DB", 0)
+        
         return {
-            "host": self.get("REDIS_HOST", "localhost"),
-            "port": self.get_int("REDIS_PORT", 6379),
-            "db": self.get_int("REDIS_DB", 0),
+            "host": host,
+            "port": port,
+            "db": db,
             "password": self.get("REDIS_PASSWORD"),
-            "url": self.get("REDIS_URL")
+            "url": redis_url or f"redis://{host}:{port}/{db}"
         }
     
     def get_redis_host(self) -> str:

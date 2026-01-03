@@ -23,13 +23,22 @@ except ImportError:
 class RedisAlertingAdapter:
     """Raw Redis alerting adapter for alert management integration."""
     
-    def __init__(self, redis_url: str = "redis://localhost:6379", **kwargs):
+    def __init__(self, redis_url: str = None, config_adapter=None, **kwargs):
         """
         Initialize Redis alerting adapter.
         
         Args:
-            redis_url: Redis server URL
+            redis_url: Redis server URL (optional - will use config_adapter if not provided)
+            config_adapter: ConfigAdapter for reading configuration (optional)
         """
+        # Get Redis URL from config_adapter if not provided
+        if not redis_url:
+            if config_adapter:
+                redis_url = config_adapter.get("REDIS_URL", "redis://symphainy-redis:6379")
+            else:
+                # Default to container name in Docker environment
+                redis_url = "redis://symphainy-redis:6379"
+        
         self.redis_url = redis_url
         self.logger = logging.getLogger("RedisAlertingAdapter")
         

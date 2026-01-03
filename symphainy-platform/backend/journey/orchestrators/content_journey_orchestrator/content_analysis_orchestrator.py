@@ -89,6 +89,129 @@ class ContentJourneyOrchestrator(OrchestratorBase):
         # NOTE: File storage is handled by FileManagementAbstraction (GCS + Supabase)
         # No in-memory storage needed - files are persisted via infrastructure abstractions
     
+    # ============================================================================
+    # UNIFIED SOA API → MCP TOOL PATTERN (Phase 3.2.5)
+    # ============================================================================
+    
+    def _define_soa_api_handlers(self) -> Dict[str, Any]:
+        """
+        Define Content Journey Orchestrator SOA APIs.
+        
+        UNIFIED PATTERN: MCP Server automatically registers these as MCP Tools.
+        
+        Returns:
+            Dict of SOA API definitions with handlers, input schemas, and descriptions
+        """
+        return {
+            "upload_file": {
+                "handler": self.handle_content_upload,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_data": {
+                            "type": "string",
+                            "format": "binary",
+                            "description": "Binary file data"
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "Original filename"
+                        },
+                        "file_type": {
+                            "type": "string",
+                            "description": "MIME type"
+                        },
+                        "user_id": {
+                            "type": "string",
+                            "description": "User identifier",
+                            "default": "api_user"
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session ID for workflow tracking",
+                            "default": None
+                        }
+                    },
+                    "required": ["file_data", "filename", "file_type"]
+                },
+                "description": "Upload file to Content realm (delegates to Content Steward)"
+            },
+            "process_file": {
+                "handler": self.process_file,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_id": {
+                            "type": "string",
+                            "description": "File UUID"
+                        },
+                        "user_id": {
+                            "type": "string",
+                            "description": "User identifier"
+                        },
+                        "copybook_file_id": {
+                            "type": "string",
+                            "description": "Optional copybook file UUID",
+                            "default": None
+                        },
+                        "processing_options": {
+                            "type": "object",
+                            "description": "Optional processing configuration",
+                            "default": None
+                        }
+                    },
+                    "required": ["file_id", "user_id"]
+                },
+                "description": "Process file (parsing + metadata extraction)"
+            },
+            "list_uploaded_files": {
+                "handler": self.list_uploaded_files,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "user_id": {
+                            "type": "string",
+                            "description": "User identifier"
+                        }
+                    },
+                    "required": ["user_id"]
+                },
+                "description": "List uploaded files for user (File Dashboard)"
+            },
+            "get_file_details": {
+                "handler": self.get_file_details,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_id": {
+                            "type": "string",
+                            "description": "File UUID"
+                        },
+                        "user_id": {
+                            "type": "string",
+                            "description": "User identifier"
+                        }
+                    },
+                    "required": ["file_id", "user_id"]
+                },
+                "description": "Get file details including metadata"
+            }
+        }
+    
+    async def _initialize_mcp_server(self):
+        """
+        Initialize Content Realm MCP Server (unified pattern).
+        
+        MCP Server automatically registers tools from _define_soa_api_handlers().
+        """
+        from .mcp_server.content_mcp_server import ContentMCPServer
+        
+        self.mcp_server = ContentMCPServer(
+            orchestrator=self,
+            di_container=self.di_container
+        )
+        await self.mcp_server.initialize()
+    
     async def _get_file_parser_service(self):
         """
         Lazy initialization of File Parser Service (Content realm service).
@@ -195,8 +318,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             if self.processing_agent and hasattr(self.processing_agent, 'set_orchestrator'):
                 self.processing_agent.set_orchestrator(self)
             
-            # Initialize MCP Server (exposes orchestrator methods as MCP tools)
-            from .mcp_server import ContentAnalysisMCPServer
+            # MCP Server initialization is handled by OrchestratorBase._initialize_mcp_server()
+            # (called automatically if orchestrator defines SOA APIs via _define_soa_api_handlers())
             
             self.mcp_server = ContentAnalysisMCPServer(
                 orchestrator=self,

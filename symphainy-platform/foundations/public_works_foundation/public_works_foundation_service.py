@@ -406,9 +406,18 @@ class PublicWorksFoundationService(FoundationServiceBase):
                 base_url=openai_base_url,
                 config_adapter=self.config_adapter  # Pass ConfigAdapter for centralized configuration
             )
-            anthropic_adapter = AnthropicAdapter(
-                config_adapter=self.config_adapter  # Pass ConfigAdapter for centralized configuration
-            )
+            # Create Anthropic adapter (optional - skip if API key not available)
+            try:
+                anthropic_adapter = AnthropicAdapter(
+                    config_adapter=self.config_adapter  # Pass ConfigAdapter for centralized configuration
+                )
+                # Only use adapter if it has an API key
+                if not anthropic_adapter.api_key:
+                    self.logger.warning("⚠️ Anthropic adapter created but API key not available - will be disabled")
+                    anthropic_adapter = None
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to create Anthropic adapter (optional): {e}")
+                anthropic_adapter = None
             # Ollama adapter is optional - comment out for now as it's not part of current platform
             # ollama_adapter = OllamaAdapter()
             
@@ -1378,7 +1387,10 @@ class PublicWorksFoundationService(FoundationServiceBase):
             self.logger.info(f"🔍 AFTER initialize_foundation() - health_abstraction: {getattr(self, 'health_abstraction', 'NOT_SET')}, telemetry_abstraction: {getattr(self, 'telemetry_abstraction', 'NOT_SET')}")
             
             if not foundation_result:
-                raise RuntimeError("initialize_foundation() returned False")
+                # Don't fail hard - log warning but continue (some adapters may be optional)
+                self.logger.warning("⚠️ initialize_foundation() returned False - some adapters may be disabled, but continuing startup")
+                # Mark as initialized anyway so other services can proceed
+                self.is_initialized = True
             
             # Initialize enhanced platform capabilities
             self.logger.info("🔧 Calling _initialize_enhanced_platform_capabilities()...")
@@ -1737,7 +1749,9 @@ class PublicWorksFoundationService(FoundationServiceBase):
             # Alert Management Adapter (Redis)
             from .infrastructure_adapters.redis_alerting_adapter import RedisAlertingAdapter
             
-            self.alert_adapter = RedisAlertingAdapter()
+            # Get Redis URL from config
+            redis_url = self.config_adapter.get("REDIS_URL", "redis://symphainy-redis:6379")
+            self.alert_adapter = RedisAlertingAdapter(redis_url=redis_url, config_adapter=self.config_adapter)
             self.logger.info("✅ Alert adapter created")
             
             # Visualization Adapter
