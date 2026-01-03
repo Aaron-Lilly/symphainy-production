@@ -660,6 +660,277 @@ class OperationsJourneyOrchestrator(OrchestratorBase):
         
         return self._sop_visualization_workflow
     
+    # ============================================================================
+    # UNIFIED SOA API → MCP TOOL PATTERN (Phase 3.2.5)
+    # ============================================================================
+    
+    def _define_soa_api_handlers(self) -> Dict[str, Any]:
+        """
+        Define Operations Journey Orchestrator SOA APIs.
+        
+        UNIFIED PATTERN: MCP Server automatically registers these as MCP Tools.
+        
+        Returns:
+            Dict of SOA API definitions with handlers, input schemas, and descriptions
+        """
+        return {
+            "execute_sop_to_workflow_workflow": {
+                "handler": self.execute_sop_to_workflow_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "sop_content": {
+                            "type": "object",
+                            "description": "SOP content (structure from parsing)"
+                        },
+                        "workflow_options": {
+                            "type": "object",
+                            "description": "Optional workflow generation options"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id, session_id)"
+                        }
+                    },
+                    "required": ["sop_content"]
+                },
+                "description": "Execute SOP to workflow conversion with solution context integration"
+            },
+            "execute_workflow_to_sop_workflow": {
+                "handler": self.execute_workflow_to_sop_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "workflow_content": {
+                            "type": "object",
+                            "description": "Workflow content (structure from parsing)"
+                        },
+                        "sop_options": {
+                            "type": "object",
+                            "description": "Optional SOP generation options"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id, session_id)"
+                        }
+                    },
+                    "required": ["workflow_content"]
+                },
+                "description": "Execute workflow to SOP conversion with solution context integration"
+            },
+            "execute_coexistence_analysis_workflow": {
+                "handler": self.execute_coexistence_analysis_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "coexistence_content": {
+                            "type": "object",
+                            "description": "Coexistence content (current state, target state, etc.)"
+                        },
+                        "analysis_options": {
+                            "type": "object",
+                            "description": "Optional analysis options"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id, session_id)"
+                        }
+                    },
+                    "required": ["coexistence_content"]
+                },
+                "description": "Execute coexistence analysis with solution context integration"
+            },
+            "execute_interactive_sop_creation_workflow": {
+                "handler": self.execute_interactive_sop_creation_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["start", "chat", "publish"],
+                            "description": "Action type"
+                        },
+                        "user_message": {
+                            "type": "string",
+                            "description": "User's chat message (for 'chat' action)"
+                        },
+                        "session_token": {
+                            "type": "string",
+                            "description": "Session token for SOP creation wizard"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id, session_id)"
+                        }
+                    },
+                    "required": ["action"]
+                },
+                "description": "Execute interactive SOP creation workflow (wizard + conversational interface)"
+            },
+            "execute_interactive_blueprint_creation_workflow": {
+                "handler": self.execute_interactive_blueprint_creation_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "user_message": {
+                            "type": "string",
+                            "description": "User's chat message"
+                        },
+                        "session_token": {
+                            "type": "string",
+                            "description": "Optional session token"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id, session_id)"
+                        }
+                    },
+                    "required": ["user_message"]
+                },
+                "description": "Execute interactive blueprint creation workflow"
+            },
+            "execute_ai_optimized_blueprint_workflow": {
+                "handler": self.execute_ai_optimized_blueprint_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "sop_file_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of SOP file IDs to use"
+                        },
+                        "workflow_file_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of workflow file IDs to use"
+                        },
+                        "optimization_options": {
+                            "type": "object",
+                            "description": "Optional optimization options"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context (includes workflow_id, session_id)"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Execute AI-optimized blueprint generation workflow"
+            },
+            "execute_workflow_visualization_workflow": {
+                "handler": self.execute_workflow_visualization_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "workflow_file_id": {
+                            "type": "string",
+                            "description": "Optional workflow file identifier"
+                        },
+                        "workflow_content": {
+                            "type": "object",
+                            "description": "Optional workflow content"
+                        },
+                        "visualization_options": {
+                            "type": "object",
+                            "description": "Optional visualization options"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Execute workflow visualization workflow"
+            },
+            "execute_sop_visualization_workflow": {
+                "handler": self.execute_sop_visualization_workflow,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "sop_file_id": {
+                            "type": "string",
+                            "description": "Optional SOP file identifier"
+                        },
+                        "sop_content": {
+                            "type": "object",
+                            "description": "Optional SOP content"
+                        },
+                        "visualization_options": {
+                            "type": "object",
+                            "description": "Optional visualization options"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Execute SOP visualization workflow"
+            },
+            "get_sop_builder_service": {
+                "handler": self.get_sop_builder_service,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Get SOP Builder Service (wraps _get_sop_builder_service() for agent access)"
+            }
+        }
+    
+    async def get_sop_builder_service(
+        self,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get SOP Builder Service (wraps _get_sop_builder_service() for agent access).
+        
+        This method wraps _get_sop_builder_service() to expose it as an SOA API
+        for agents to access via MCP tools. This replaces direct get_enabling_service() calls.
+        
+        Args:
+            user_context: Optional user context
+        
+        Returns:
+            Dict with success status and service reference:
+            {
+                "success": bool,
+                "service": SOPBuilderService instance (if available),
+                "service_name": "SOPBuilderService"
+            }
+        """
+        try:
+            sop_service = await self._get_sop_builder_service()
+            if not sop_service:
+                return {
+                    "success": False,
+                    "error": "SOP Builder Service not available",
+                    "service": None,
+                    "service_name": "SOPBuilderService"
+                }
+            
+            return {
+                "success": True,
+                "service": sop_service,
+                "service_name": "SOPBuilderService"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Get SOP Builder Service failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "service": None,
+                "service_name": "SOPBuilderService"
+            }
+    
     async def initialize(self) -> bool:
         """
         Initialize Operations Journey Orchestrator.

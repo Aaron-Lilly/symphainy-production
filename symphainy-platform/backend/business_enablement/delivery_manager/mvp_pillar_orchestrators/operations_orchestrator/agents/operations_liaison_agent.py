@@ -661,47 +661,43 @@ What would you like to do?"""
             return "standard"
     
     async def _call_sop_builder_wizard(self, description: str, user_context: UserContext, session_id: str, sop_type: str) -> Dict[str, Any]:
-        """Call the SOP Builder Wizard to create the SOP."""
+        """Call the SOP Builder Wizard to create the SOP via MCP tools (unified pattern)."""
         try:
-            # Try to get SOP Builder Service via orchestrator or curator
-            sop_service = None
-            if self.operations_orchestrator and hasattr(self.operations_orchestrator, 'get_enabling_service'):
-                try:
-                    sop_service = await self.operations_orchestrator.get_enabling_service("SOPBuilderService")
-                except Exception:
-                    pass
+            # Convert UserContext to dict for MCP tool call
+            user_context_dict = {
+                "user_id": getattr(user_context, "user_id", None),
+                "tenant_id": getattr(user_context, "tenant_id", None),
+                "roles": getattr(user_context, "roles", []),
+                "session_id": session_id
+            }
             
-            if sop_service:
-                # Use the real SOP Builder Service
-                # Convert UserContext to dict for service call
-                user_context_dict = {
-                    "user_id": getattr(user_context, "user_id", None),
-                    "tenant_id": getattr(user_context, "tenant_id", None),
-                    "roles": getattr(user_context, "roles", [])
+            # Use MCP tool to get SOP Builder Service (unified pattern)
+            # Note: We use the interactive SOP creation workflow which handles SOP creation
+            # Alternatively, we could use get_sop_builder_service MCP tool, but the workflow is more appropriate
+            sop_result = await self.execute_mcp_tool(
+                "journey_execute_interactive_sop_creation_workflow",  # Cross-realm: Journey realm MCP tool
+                {
+                    "action": "start",
+                    "user_message": f"Create a {sop_type} SOP with the following description: {description}",
+                    "session_token": session_id,
+                    "user_context": user_context_dict
                 }
-                
-                # Call the SOP Builder Service with correct signature
-                sop_response = await sop_service.create_sop(
-                    description=description,
-                    template_type=sop_type,
-                    user_context=user_context_dict,
-                    options={
-                        "enhance_content": True,
-                        "generate_workflow": True
-                    }
-                )
-                
+            )
+            
+            if sop_result.get("success"):
+                # Extract SOP information from workflow result
+                sop_structure = sop_result.get("sop_structure", {})
                 return {
-                    "success": sop_response.get("success", False),
-                    "sop_id": sop_response.get("sop_id"),
+                    "success": True,
+                    "sop_id": sop_structure.get("sop_id") or sop_result.get("sop_id"),
                     "sop_type": sop_type,
-                    "processing_time": sop_response.get("processing_time", 0),
-                    "message": sop_response.get("message", "SOP created successfully"),
-                    "sop_content": sop_response.get("sop_content"),
-                    "workflow_steps": sop_response.get("workflow_steps", [])
+                    "processing_time": sop_result.get("processing_time", 0),
+                    "message": sop_result.get("message", "SOP created successfully"),
+                    "sop_content": sop_structure.get("content") or sop_structure,
+                    "workflow_steps": sop_structure.get("workflow_steps", [])
                 }
             else:
-                # Fallback to simulation if service not available
+                # Fallback to simulation if MCP tool fails
                 import time
                 start_time = time.time()
                 
@@ -709,7 +705,7 @@ What would you like to do?"""
                 sop_id = f"sop_{session_id}_{int(time.time())}"
                 processing_time = time.time() - start_time
                 
-                self.logger.warning("⚠️ SOP Builder Service not available, using simulation mode")
+                self.logger.warning(f"⚠️ SOP creation via MCP tool failed: {sop_result.get('error')}, using simulation mode")
                 
                 return {
                     "success": True,
