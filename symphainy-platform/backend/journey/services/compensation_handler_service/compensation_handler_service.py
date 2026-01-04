@@ -37,7 +37,7 @@ class CompensationHandlerService(RealmServiceBase):
         # Will be initialized in initialize()
         self.librarian = None
         self.data_steward = None
-        self.content_steward = None
+        self.data_steward = None
         self.conductor = None
         
         # Journey services (discovered via Curator)
@@ -66,7 +66,6 @@ class CompensationHandlerService(RealmServiceBase):
             # 1. Get Smart City services
             self.librarian = await self.get_librarian_api()
             self.data_steward = await self.get_data_steward_api()
-            self.content_steward = await self.get_content_steward_api()
             self.conductor = await self.get_conductor_api()
             
             # 2. Discover Journey services via Curator
@@ -430,14 +429,14 @@ class CompensationHandlerService(RealmServiceBase):
         
         try:
             # Delete embeddings via Content Steward or Librarian
-            if self.content_steward:
+            if self.data_steward:
                 # Content Steward manages embeddings
                 if content_id:
-                    await self.content_steward.delete_embeddings(content_id, user_context=user_context)
+                    await self.data_steward.delete_embeddings(content_id, user_context=user_context)
                 elif parsed_file_id:
-                    await self.content_steward.delete_embeddings_by_parsed_file(parsed_file_id, user_context=user_context)
+                    await self.data_steward.delete_embeddings_by_parsed_file(parsed_file_id, user_context=user_context)
                 elif file_id:
-                    await self.content_steward.delete_embeddings_by_file(file_id, user_context=user_context)
+                    await self.data_steward.delete_embeddings_by_file(file_id, user_context=user_context)
                 
                 self.logger.info(f"✅ Compensated: Deleted embeddings for {file_id or parsed_file_id or content_id}")
                 return {

@@ -37,7 +37,7 @@ class FieldExtractionService(RealmServiceBase):
         super().__init__(service_name, realm_name, platform_gateway, di_container)
         
         # Smart City service APIs (will be initialized in initialize())
-        self.content_steward = None
+        self.data_steward = None
         self.librarian = None
         self.nurse = None
         
@@ -52,7 +52,7 @@ class FieldExtractionService(RealmServiceBase):
             self.logger.info("🚀 Initializing Field Extraction Service...")
             
             # Get Smart City services
-            self.content_steward = await self.get_smart_city_service("ContentStewardService")
+            self.data_steward = await self.get_smart_city_service("DataStewardService")
             self.librarian = await self.get_smart_city_service("LibrarianService")
             self.nurse = await self.get_smart_city_service("NurseService")
             
@@ -111,17 +111,17 @@ class FieldExtractionService(RealmServiceBase):
             await self.log_operation_with_telemetry("extract_fields_start", success=True, metadata={"file_id": file_id})
             
             # Step 1: Get file content
-            if not self.content_steward:
-                self.content_steward = await self.get_smart_city_service("ContentStewardService")
+            if not self.data_steward:
+                self.data_steward = await self.get_smart_city_service("DataStewardService")
             
-            if not self.content_steward:
+            if not self.data_steward:
                 return {
                     "success": False,
                     "error": "Content Steward service not available"
                 }
             
             # Get parsed file (should already be parsed)
-            parsed_file = await self.content_steward.get_parsed_file(file_id)
+            parsed_file = await self.data_steward.get_parsed_file(file_id)
             if not parsed_file:
                 return {
                     "success": False,

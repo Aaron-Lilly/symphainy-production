@@ -116,40 +116,35 @@ class DataPathBootstrap:
             from backend.smart_city.sdk.dil_sdk import DILSDK
             
             # Get Smart City services
-            content_steward = None
+            data_steward = None
             librarian = None
             data_steward = None
             nurse = None
             
-            if hasattr(orchestrator, 'get_content_steward_api'):
-                content_steward = await orchestrator.get_content_steward_api()
+            # Get Data Steward (replaces Content Steward)
+            if hasattr(orchestrator, 'get_data_steward_api'):
+                data_steward = await orchestrator.get_data_steward_api()
             elif hasattr(orchestrator, 'get_smart_city_api'):
-                content_steward = await orchestrator.get_smart_city_api("ContentSteward")
+                data_steward = await orchestrator.get_smart_city_api("DataSteward")
             
             if hasattr(orchestrator, 'get_librarian_api'):
                 librarian = await orchestrator.get_librarian_api()
             elif hasattr(orchestrator, 'get_smart_city_api'):
                 librarian = await orchestrator.get_smart_city_api("Librarian")
             
-            if hasattr(orchestrator, 'get_data_steward_api'):
-                data_steward = await orchestrator.get_data_steward_api()
-            elif hasattr(orchestrator, 'get_smart_city_api'):
-                data_steward = await orchestrator.get_smart_city_api("DataSteward")
-            
             if hasattr(orchestrator, 'get_nurse_api'):
                 nurse = await orchestrator.get_nurse_api()
             elif hasattr(orchestrator, 'get_smart_city_api'):
                 nurse = await orchestrator.get_smart_city_api("Nurse")
             
-            if not all([content_steward, librarian, data_steward, nurse]):
+            if not all([librarian, data_steward, nurse]):
                 self.service.logger.warning(f"⚠️ Not all Smart City services available for orchestrator")
                 return False
             
             # Initialize DIL SDK
             smart_city_services = {
-                "content_steward": content_steward,
+                "data_steward": data_steward,  # Data Steward replaces Content Steward
                 "librarian": librarian,
-                "data_steward": data_steward,
                 "nurse": nurse
             }
             orchestrator.dil_sdk = DILSDK(smart_city_services, logger=orchestrator.logger if hasattr(orchestrator, 'logger') else None)
@@ -196,12 +191,12 @@ class DataPathBootstrap:
         services_status = {}
         
         try:
-            # Check Content Steward
-            content_steward = await self.service.get_smart_city_api("ContentSteward")
-            if content_steward and hasattr(content_steward, 'file_management_abstraction') and content_steward.file_management_abstraction:
-                services_status["content_steward"] = "ready"
+            # Check Data Steward (Content Steward consolidated)
+            data_steward = await self.service.get_smart_city_api("DataSteward")
+            if data_steward and hasattr(data_steward, 'file_management_abstraction') and data_steward.file_management_abstraction:
+                services_status["data_steward"] = "ready"
             else:
-                services_status["content_steward"] = "not_ready"
+                services_status["data_steward"] = "not_ready"
             
             # Check Librarian
             librarian = await self.service.get_smart_city_api("Librarian")

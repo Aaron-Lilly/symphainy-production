@@ -6,12 +6,12 @@ WHAT: Orchestrates content operations (parsing, semantic layer creation)
 HOW: Delegates to Content realm services (FileParserService, etc.) while preserving UI integration
 
 This orchestrator is in the Journey realm and orchestrates content operations.
-It extends Smart City capabilities (ContentSteward) to create the semantic data layer.
+It extends Smart City capabilities (Data Steward - Content Steward consolidated) to create the semantic data layer.
 
 Architecture:
 - Journey Realm: Operations orchestration
 - Orchestrates Content realm services (FileParserService, semantic layer services)
-- Uses Smart City services (ContentSteward, DataSteward) via Curator
+- Uses Smart City services (Data Steward - Content Steward consolidated) via Curator
 - Self-initializing (doesn't require ContentManager)
 """
 
@@ -58,7 +58,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
     Key Principles:
     - Journey Realm: Operations orchestration
     - Orchestrates Content realm services (FileParserService, semantic layer services)
-    - Uses Smart City services (ContentSteward, DataSteward) via Curator
+    - Uses Smart City services (Data Steward - Content Steward consolidated) via Curator
     - Self-initializing (doesn't require ContentManager)
     
     This orchestrator has an MCP Server that exposes use case-level tools for agents.
@@ -134,7 +134,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     },
                     "required": ["file_data", "filename", "file_type"]
                 },
-                "description": "Upload file to Content realm (delegates to Content Steward)"
+                "description": "Upload file to Content realm (delegates to Data Steward)"
             },
             "process_file": {
                 "handler": self.process_file,
@@ -239,7 +239,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     },
                     "required": ["parsed_file_id"]
                 },
-                "description": "Get parsed file data (wraps ContentSteward.get_parsed_file())"
+                "description": "Get parsed file data (wraps Data Steward.get_parsed_file())"
             },
             "get_semantic_embeddings": {
                 "handler": self.get_semantic_embeddings,
@@ -294,17 +294,17 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             Parsed file data with metadata
         """
         try:
-            # Get Content Steward API
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            # Get Data Steward API (Content Steward consolidated into Data Steward)
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
-                    "error": "Content Steward not available",
+                    "error": "Data Steward not available",
                     "parsed_file_id": parsed_file_id
                 }
             
-            # Call ContentSteward.get_parsed_file()
-            parsed_file = await content_steward.get_parsed_file(parsed_file_id, user_context)
+            # Call DataSteward.get_parsed_file()
+            parsed_file = await data_steward.get_parsed_file(parsed_file_id, user_context)
             
             if not parsed_file:
                 return {
@@ -1066,8 +1066,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
         """
         Handle file upload (MVP use case orchestration).
         
-        Delegates to Content Steward for file storage (GCS + Supabase).
-        Requires Content Steward service to be available.
+        Delegates to Data Steward for file storage (GCS + Supabase).
+        Requires Data Steward service to be available.
         
         Args:
             file_data: Binary file data
@@ -1122,21 +1122,22 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 # No need to track here - it's handled upstream
             
             # ========================================================================
-            # ✅ PROPER: Call Content Steward directly (Content realm service)
+            # ✅ PROPER: Call Data Steward directly (Content Steward consolidated into Data Steward)
             # ========================================================================
             # ContentJourneyOrchestrator is called BY DataSolutionOrchestratorService
             # So we should NOT call DataSolutionOrchestratorService here (that would create a circular dependency)
-            # Instead, call Content Steward directly
+            # Instead, call Data Steward directly (Content Steward consolidated)
             # ========================================================================
             
-            # Get Content Steward for proper file storage (GCS + Supabase)
+            # Get Data Steward for proper file storage (GCS + Supabase)
             # Access via OrchestratorBase (delegates to RealmServiceBase)
-            content_steward = await self.get_content_steward_api()
+            # Note: Content Steward consolidated into Data Steward
+            data_steward = await self.get_data_steward_api()
             
-            if not content_steward:
-                raise Exception("Content Steward service not available - file upload requires infrastructure")
+            if not data_steward:
+                raise Exception("Data Steward service not available - file upload requires infrastructure")
             
-            # Prepare metadata for Content Steward with proper field names
+            # Prepare metadata for Data Steward with proper field names
             # Check if this is an SOP/Workflow file that should be processed in Operations Pillar
             processing_pillar = None
             if content_info["file_type_category"] == "sop_workflow":
@@ -1161,7 +1162,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             from utilities.security_authorization.request_context import get_request_user_context
             ctx = get_request_user_context()
             
-            # Prepare user_context for Content Steward
+            # Prepare user_context for Data Steward
             # Merge request-scoped context (with permissions) with upload-specific fields
             user_context = {
                 "user_id": user_id,
@@ -1181,13 +1182,13 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             else:
                 self.logger.warning(f"⚠️ [handle_content_upload] No user context available in request context - permissions may be missing")
             
-            upload_result = await content_steward.process_upload(file_data, file_type, metadata, user_context)
+            upload_result = await data_steward.process_upload(file_data, file_type, metadata, user_context)
             
             # Extract file_id from result
             file_uuid = upload_result.get("uuid") or upload_result.get("file_id")
             
             if upload_result.get("success") or upload_result.get("status") == "success" or file_uuid:
-                self.logger.info(f"✅ File uploaded via Content Steward (GCS + Supabase): {filename}")
+                self.logger.info(f"✅ File uploaded via Data Steward (GCS + Supabase): {filename}")
                 
                 # Ensure we have file_uuid
                 if not file_uuid:
@@ -1226,7 +1227,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 return return_dict
             else:
                 error_msg = upload_result.get("error") or upload_result.get("message") or "Unknown error"
-                raise Exception(f"Content Steward upload failed: {error_msg}")
+                raise Exception(f"Data Steward upload failed: {error_msg}")
             
         except Exception as e:
             self.logger.error(f"❌ File upload failed: {e}", exc_info=True)
@@ -1346,7 +1347,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 }
             
             # ========================================================================
-            # Convert parsed data to parquet and store via Content Steward
+            # Convert parsed data to parquet and store via Data Steward
             # ========================================================================
             parsed_file_id = None
             content_type = parse_result.get("parsing_type", "structured")  # structured, unstructured, hybrid
@@ -1358,11 +1359,11 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     parquet_bytes = await self._convert_to_parquet_bytes(parse_result)
                     
                     if parquet_bytes:
-                        # Get Content Steward API
-                        content_steward = await self.get_content_steward_api()
-                        if content_steward:
-                            # Store parsed file via Content Steward
-                            store_result = await content_steward.store_parsed_file(
+                        # Get Data Steward API (Content Steward consolidated into Data Steward)
+                        data_steward = await self.get_data_steward_api()
+                        if data_steward:
+                            # Store parsed file via Data Steward
+                            store_result = await data_steward.store_parsed_file(
                                 file_id=file_id,
                                 parsed_file_data=parquet_bytes,
                                 format_type="parquet",
@@ -1384,7 +1385,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                             else:
                                 self.logger.warning(f"⚠️ store_parsed_file returned None")
                         else:
-                            self.logger.warning(f"⚠️ Content Steward not available - cannot store parsed file")
+                            self.logger.warning(f"⚠️ Data Steward not available - cannot store parsed file")
                     else:
                         self.logger.warning(f"⚠️ Failed to convert parsed data to parquet bytes")
                 except Exception as e:
@@ -1514,7 +1515,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
         """
         Get file details including metadata (File Details + Metadata Preview).
         
-        Uses Content Steward to get file metadata from Supabase.
+        Uses Data Steward to get file metadata from Supabase.
         
         Args:
             file_id: File UUID
@@ -1526,7 +1527,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
         try:
             self.logger.info(f"🔍 Getting file details: {file_id}")
             
-            # Use RealmServiceBase.retrieve_document() which uses Content Steward
+            # Use RealmServiceBase.retrieve_document() which uses Data Steward
             file_doc = await self._realm_service.retrieve_document(file_id)
             
             if not file_doc:
@@ -1905,7 +1906,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
         try:
             self.logger.info(f"👁️ Previewing parsed file: {parsed_file_id} (max_rows={max_rows}, max_columns={max_columns})")
             
-            # Retrieve parquet file from Content Steward
+            # Retrieve parquet file from Data Steward
             parsed_file = await self._realm_service.retrieve_document(parsed_file_id)
             
             if not parsed_file:
@@ -1989,23 +1990,18 @@ class ContentJourneyOrchestrator(OrchestratorBase):
         try:
             self.logger.info(f"📋 Listing parsed files for user: {user_id}" + (f" (file_id: {file_id})" if file_id else ""))
             
-            # Get Content Steward API
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            # Get Data Steward API (Content Steward consolidated into Data Steward)
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "parsed_files": [],
                     "count": 0,
-                    "error": "Content Steward not available"
+                    "error": "Data Steward not available"
                 }
             
-            # Query parsed files (this would need to be implemented in Content Steward)
-            # For now, we'll use a placeholder that queries by file_id or user_id
-            # TODO: Implement proper query in Content Steward for parsed files
-            
-            # Placeholder: Return empty list for now
-            # In production, this would query Content Steward for parsed files
-            parsed_files = []
+            # Query parsed files via Data Steward
+            parsed_files = await data_steward.list_parsed_files(file_id=file_id, user_id=user_id, user_context=user_context)
             
             self.logger.info(f"✅ Found {len(parsed_files)} parsed files for user: {user_id}")
             

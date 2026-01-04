@@ -9,7 +9,7 @@ WHAT (Smart City Role): I orchestrate strategic communication with proper infras
 HOW (Service Implementation): I use SmartCityRoleBase with micro-modules loaded dynamically
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
 import json
 
@@ -40,6 +40,7 @@ class PostOfficeService(SmartCityRoleBase, PostOfficeServiceProtocol):
         # Infrastructure Abstractions (will be initialized via mixin methods in modules)
         self.messaging_abstraction = None
         self.event_management_abstraction = None
+        self.event_bus_foundation = None  # EventBusFoundationService (Post Office owns event bus)
         self.session_abstraction = None
         
         # Service State
@@ -208,6 +209,161 @@ class PostOfficeService(SmartCityRoleBase, PostOfficeServiceProtocol):
         """Unsubscribe from events via Post Office."""
         # Service-level method delegates to module (module handles utilities)
         return await self.event_routing_module.unsubscribe_from_events(request, user_context)
+    
+    # ============================================================================
+    # EVENT BUS SOA APIs (for Realm Access)
+    # ============================================================================
+    # These methods provide a simpler interface for realms to access event bus
+    # They wrap the existing event_routing_module methods with realm-friendly signatures
+    # ============================================================================
+    
+    async def publish_event_soa(
+        self,
+        event_type: str,
+        event_data: Dict[str, Any],
+        workflow_id: Optional[str] = None,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Publish event to event bus (SOA API for realms).
+        
+        This is the SOA API method that realms should use to publish events.
+        It wraps the internal publish_event method with a simpler interface.
+        
+        Args:
+            event_type: Event type (e.g., "file.uploaded", "analysis.completed")
+            event_data: Event data dictionary
+            workflow_id: Optional workflow ID for correlation
+            user_context: Optional user context (for security/tenant validation)
+            
+        Returns:
+            Dict with success status, event_id, and event_type
+        """
+        try:
+            # Build request dict for internal method
+            request = {
+                "event_type": event_type,
+                "event_data": event_data,
+                "source": user_context.get("realm_name") if user_context else "system",
+                "target": "*",  # Broadcast to all
+                "priority": "normal",
+                "correlation_id": workflow_id or user_context.get("correlation_id") if user_context else None,
+                "tenant_id": user_context.get("tenant_id") if user_context else None
+            }
+            
+            # Use EventBusFoundationService if available, otherwise fall back to event_management_abstraction
+            if self.event_bus_foundation:
+                try:
+                    event_id = await self.event_bus_foundation.publish_event(
+                        event_type=event_type,
+                        event_data=event_data,
+                        source_realm=request.get("source", "system"),
+                        priority="normal"
+                    )
+                    
+                    if event_id:
+                        return {
+                            "success": True,
+                            "event_id": event_id,
+                            "event_type": event_type,
+                            "published_at": datetime.utcnow().isoformat()
+                        }
+                    else:
+                        # Fall back to internal method if EventBusFoundationService fails
+                        return await self.publish_event(request, user_context)
+                except Exception as e:
+                    self.logger.warning(f"⚠️ EventBusFoundationService failed, falling back to internal method: {e}")
+                    return await self.publish_event(request, user_context)
+            else:
+                # Use internal method (event_management_abstraction)
+                return await self.publish_event(request, user_context)
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to publish event via SOA API: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "event_type": event_type
+            }
+    
+    async def subscribe_to_events_soa(
+        self,
+        event_types: List[str],
+        callback: Callable,
+        realm: str,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Subscribe to events (SOA API for realms).
+        
+        This is the SOA API method that realms should use to subscribe to events.
+        It wraps the internal subscribe_to_events method with a simpler interface.
+        
+        Args:
+            event_types: List of event types to subscribe to (e.g., ["file.uploaded", "analysis.completed"])
+            callback: Callback function for events (async function that receives event_data)
+            realm: Requesting realm name
+            user_context: Optional user context (for security/tenant validation)
+            
+        Returns:
+            Dict with success status and subscription info
+        """
+        try:
+            # Use EventBusFoundationService if available
+            if self.event_bus_foundation:
+                try:
+                    # Subscribe to each event type
+                    for event_type in event_types:
+                        await self.event_bus_foundation.subscribe_to_event(
+                            realm=realm,
+                            event_type=event_type,
+                            handler=callback
+                        )
+                    
+                    return {
+                        "success": True,
+                        "event_types": event_types,
+                        "realm": realm,
+                        "subscribed_at": datetime.utcnow().isoformat()
+                    }
+                except Exception as e:
+                    self.logger.warning(f"⚠️ EventBusFoundationService failed, falling back to internal method: {e}")
+                    # Fall back to internal method
+                    request = {
+                        "event_type": event_types[0] if event_types else "unknown",
+                        "handler_id": f"{realm}_{event_types[0]}" if event_types else f"{realm}_unknown"
+                    }
+                    return await self.subscribe_to_events(request, user_context)
+            else:
+                # Use internal method (event_management_abstraction)
+                # Note: Internal method only supports one event type at a time
+                results = []
+                for event_type in event_types:
+                    request = {
+                        "event_type": event_type,
+                        "handler_id": f"{realm}_{event_type}"
+                    }
+                    result = await self.subscribe_to_events(request, user_context)
+                    results.append(result)
+                
+                # Return combined result
+                all_success = all(r.get("success", False) for r in results)
+                return {
+                    "success": all_success,
+                    "event_types": event_types,
+                    "realm": realm,
+                    "results": results,
+                    "subscribed_at": datetime.utcnow().isoformat()
+                }
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to subscribe to events via SOA API: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "event_types": event_types,
+                "realm": realm
+            }
     
     async def register_agent(self, request: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Register agent for communication."""

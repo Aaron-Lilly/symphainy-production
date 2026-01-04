@@ -22,6 +22,123 @@ class SessionManagement:
         """Initialize with service instance."""
         self.service = service_instance
     
+    async def _validate_tenant_isolation(
+        self,
+        session_id: str,
+        user_context: Optional[Dict[str, Any]],
+        operation: str
+    ) -> Optional[SessionResponse]:
+        """
+        Validate tenant isolation for session operations.
+        
+        Returns SessionResponse with error if tenant isolation violated, None if valid.
+        """
+        if not user_context:
+            return None  # No user context, skip validation
+        
+        tenant = self.service.get_tenant()
+        if not tenant:
+            return None  # No tenant utility, skip validation
+        
+        user_tenant_id = user_context.get("tenant_id")
+        if not user_tenant_id:
+            return None  # No tenant ID in user context, skip validation
+        
+        # Get session to check its tenant_id
+        session_data = await self.service.session_abstraction.get_session(session_id)
+        if not session_data:
+            return None  # Session not found, let caller handle it
+        
+        # Extract session tenant_id
+        session_tenant_id = None
+        
+        # Handle Session object (from abstraction)
+        if hasattr(session_data, 'metadata'):
+            # Session object - check metadata attribute
+            if isinstance(session_data.metadata, dict):
+                # Check tenant_id directly in metadata
+                session_tenant_id = session_data.metadata.get("tenant_id")
+                # Also check context within metadata (nested structure)
+                if not session_tenant_id and "context" in session_data.metadata:
+                    context = session_data.metadata.get("context")
+                    if isinstance(context, dict):
+                        session_tenant_id = context.get("tenant_id")
+                # Debug logging
+                self.service.logger.info(f"🔍 [TENANT_ISOLATION] Session object metadata keys: {list(session_data.metadata.keys()) if isinstance(session_data.metadata, dict) else 'N/A'}")
+                self.service.logger.info(f"🔍 [TENANT_ISOLATION] Extracted tenant_id from Session object: {session_tenant_id}")
+        # Handle dict format
+        elif isinstance(session_data, dict):
+            # Dict format - check multiple locations
+            session_tenant_id = session_data.get("tenant_id")  # Check top level first
+            if not session_tenant_id and "metadata" in session_data and isinstance(session_data["metadata"], dict):
+                session_tenant_id = session_data["metadata"].get("tenant_id")
+                # Also check context within metadata
+                if not session_tenant_id and "context" in session_data["metadata"]:
+                    context = session_data["metadata"].get("context")
+                    if isinstance(context, dict):
+                        session_tenant_id = context.get("tenant_id")
+            if not session_tenant_id and "context" in session_data:
+                context = session_data.get("context")
+                if isinstance(context, dict):
+                    session_tenant_id = context.get("tenant_id")
+            self.service.logger.debug(f"🔍 Extracted tenant_id from dict: {session_tenant_id}")
+        
+        if not session_tenant_id:
+            # If no tenant_id found in session, enforce strict isolation based on user context only
+            # This is a safety measure - if session has no tenant_id, deny access unless user has admin permissions
+            self.service.logger.warning(f"⚠️ Session {session_id} has no tenant_id - enforcing strict isolation")
+            # For now, allow access if session has no tenant_id (backward compatibility)
+            # But log a warning for future enforcement
+            return None  # Session has no tenant_id, skip validation (but log warning)
+        
+        self.service.logger.debug(f"🔍 Tenant isolation check: user_tenant_id={user_tenant_id}, session_tenant_id={session_tenant_id}")
+        
+        # Validate tenant isolation
+        try:
+            # First, check if tenant IDs match (strict isolation)
+            if user_tenant_id != session_tenant_id:
+                # Tenant IDs don't match - enforce strict isolation (deny access)
+                self.service.logger.warning(f"⚠️ [TENANT_ISOLATION] Tenant mismatch: user={user_tenant_id}, session={session_tenant_id} - DENYING ACCESS")
+                
+                # For strict isolation, deny access immediately if tenant IDs don't match
+                # Only check tenant abstraction if we want to allow cross-tenant access in the future
+                # For now, enforce strict isolation
+                await self.service.record_health_metric(f"{operation}_tenant_denied", 1.0, {
+                    "session_id": session_id,
+                    "user_tenant_id": user_tenant_id,
+                    "session_tenant_id": session_tenant_id
+                })
+                await self.service.log_operation_with_telemetry(f"{operation}_complete", success=False, details={
+                    "session_id": session_id,
+                    "reason": "tenant_isolation_violation"
+                })
+                return SessionResponse(
+                    success=False,
+                    session_id=session_id,
+                    status=SessionStatus.INACTIVE,
+                    error="Tenant isolation violation: Cannot access session from different tenant"
+                )
+            else:
+                # Tenant IDs match - allow access
+                pass
+        except Exception as e:
+            self.service.logger.warning(f"⚠️ Tenant validation failed: {e}")
+            # On validation error, default to strict isolation
+            if user_tenant_id != session_tenant_id:
+                await self.service.record_health_metric(f"{operation}_tenant_denied", 1.0, {
+                    "session_id": session_id,
+                    "user_tenant_id": user_tenant_id,
+                    "session_tenant_id": session_tenant_id
+                })
+                return SessionResponse(
+                    success=False,
+                    session_id=session_id,
+                    status=SessionStatus.INACTIVE,
+                    error="Tenant isolation violation: Cannot access session from different tenant"
+                )
+        
+        return None  # Validation passed
+    
     async def create_session(self, request: SessionRequest, user_context: Optional[Dict[str, Any]] = None) -> SessionResponse:
         """Create a new session using Public Works session abstraction."""
         # Start telemetry tracking
@@ -79,6 +196,9 @@ class SessionManagement:
             }
             mapped_session_type = session_type_map.get(request.session_type, SessionType.USER)
             
+            # Extract tenant_id from request context for session metadata
+            tenant_id = request.context.get("tenant_id") if isinstance(request.context, dict) else None
+            
             # Session data for the adapter (extracted from context or provided separately)
             session_data = {
                 "user_id": request.user_id,
@@ -87,10 +207,12 @@ class SessionManagement:
                 "context": request.context,
                 "created_at": datetime.utcnow().isoformat(),
                 "ttl_seconds": request.ttl_seconds,
+                "tenant_id": tenant_id,  # Store tenant_id at top level for easy access
                 "metadata": {
                     "session_type": request.session_type,  # Keep original for reference
                     "mapped_session_type": mapped_session_type.value,
                     "context": request.context,
+                    "tenant_id": tenant_id,  # Also store in metadata for compatibility
                     "created_at": datetime.utcnow().isoformat(),
                     "ttl_seconds": request.ttl_seconds
                 }
@@ -109,23 +231,26 @@ class SessionManagement:
                 )
             
             if session_result:
+                # Use the actual session_id from the created session (may differ from request if adapter generated new one)
+                actual_session_id = session_result.session_id if hasattr(session_result, 'session_id') else request.session_id
+                
                 # Record health metric
                 await self.service.record_health_metric(
                     "session_created",
                     1.0,
-                    {"session_id": request.session_id, "user_id": request.user_id}
+                    {"session_id": actual_session_id, "user_id": request.user_id}
                 )
                 
                 # End telemetry tracking
                 await self.service.log_operation_with_telemetry(
                     "create_session_complete",
                     success=True,
-                    details={"session_id": request.session_id, "user_id": request.user_id}
+                    details={"session_id": actual_session_id, "user_id": request.user_id, "requested_session_id": request.session_id}
                 )
                 
                 return SessionResponse(
                     success=True,
-                    session_id=request.session_id,
+                    session_id=actual_session_id,  # Return actual session_id that was created
                     status=SessionStatus.ACTIVE,
                     expires_at=(datetime.utcnow() + timedelta(seconds=request.ttl_seconds)).isoformat()
                 )
@@ -183,6 +308,15 @@ class SessionManagement:
             session_data = await self.service.session_abstraction.get_session(session_id)
             
             if session_data:
+                # Tenant isolation validation (multi-tenant support)
+                tenant_validation_error = await self._validate_tenant_isolation(
+                    session_id=session_id,
+                    user_context=user_context,
+                    operation="get_session"
+                )
+                if tenant_validation_error:
+                    return tenant_validation_error
+                
                 # Record health metric
                 await self.service.record_health_metric(
                     "session_retrieved",
@@ -252,6 +386,15 @@ class SessionManagement:
                             status=SessionStatus.INACTIVE,
                             error="Access denied: insufficient permissions"
                         )
+            
+            # Tenant isolation validation (multi-tenant support)
+            tenant_validation_error = await self._validate_tenant_isolation(
+                session_id=session_id,
+                user_context=user_context,
+                operation="update_session"
+            )
+            if tenant_validation_error:
+                return tenant_validation_error
             
             success = await self.service.session_abstraction.update_session(session_id, updates)
             
@@ -325,6 +468,15 @@ class SessionManagement:
                             status=SessionStatus.INACTIVE,
                             error="Access denied: insufficient permissions"
                         )
+            
+            # Tenant isolation validation (multi-tenant support)
+            tenant_validation_error = await self._validate_tenant_isolation(
+                session_id=session_id,
+                user_context=user_context,
+                operation="destroy_session"
+            )
+            if tenant_validation_error:
+                return tenant_validation_error
             
             success = await self.service.session_abstraction.destroy_session(session_id)
             

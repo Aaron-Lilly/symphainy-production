@@ -48,15 +48,15 @@ class EmbeddingService(RealmServiceBase):
         
         # Smart City service APIs (will be initialized in initialize())
         self.librarian = None
-        self.content_steward = None  # For retrieving parsed files
+        self.data_steward = None  # For retrieving parsed files (Content Steward consolidated)
         self.semantic_data = None  # SemanticDataAbstraction for storing embeddings
         self.nurse = None  # For observability
         
         # Embedding generation (HuggingFaceAdapter - PRIMARY PATHWAY ONLY)
         self.hf_adapter = None  # HuggingFace Inference Endpoint adapter (required)
         
-        # LLM abstraction for semantic meaning inference
-        self.llm_abstraction = None
+        # Agent for semantic meaning inference (via Agentic Foundation SDK - NO direct LLM access)
+        self.semantic_meaning_agent = None
         
         # Initialize micro-modules
         self.utilities_module = Utilities(self)

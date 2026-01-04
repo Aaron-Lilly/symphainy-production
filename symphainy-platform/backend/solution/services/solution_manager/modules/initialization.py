@@ -105,6 +105,13 @@ class Initialization:
                     self.service.logger.warning("⚠️ PlatformInfrastructureGateway not available - Data Solution Orchestrator will be lazy-loaded")
                 return False
             
+            # Get City Manager for lifecycle ownership
+            city_manager = self.service.di_container.get_foundation_service("CityManagerService")
+            
+            # Register Data Solution Orchestrator for initialization (City Manager controls lifecycle)
+            if city_manager:
+                await city_manager.service_management_module.register_service_for_initialization("DataSolutionOrchestratorService")
+            
             # Initialize Data Solution Orchestrator Service
             data_solution_orchestrator = DataSolutionOrchestratorService(
                 service_name="DataSolutionOrchestratorService",

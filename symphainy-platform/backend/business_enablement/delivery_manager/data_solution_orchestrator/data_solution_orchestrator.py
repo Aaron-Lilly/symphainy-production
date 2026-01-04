@@ -122,15 +122,15 @@ class DataSolutionOrchestrator(OrchestratorBase):
             self.logger.info(f"📥 Orchestrating data ingestion: {file_name} (workflow_id: {workflow_id})")
             
             # Upload via Content Steward (direct SOA API call - no SDK)
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "Content Steward service not available",
                     "workflow_id": workflow_id
                 }
             
-            upload_result = await content_steward.process_upload(
+            upload_result = await data_steward.process_upload(
                 file_data=file_data,
                 content_type=file_type,
                 metadata={"ui_name": file_name},
@@ -279,8 +279,8 @@ class DataSolutionOrchestrator(OrchestratorBase):
                 }
             
             # Store parsed file via Content Steward (direct SOA API)
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "Content Steward service not available",
@@ -295,7 +295,7 @@ class DataSolutionOrchestrator(OrchestratorBase):
             format_type = "json_structured" if parsing_type == "structured" else "json_chunks"
             content_type = parsing_type
             
-            store_result = await content_steward.store_parsed_file(
+            store_result = await data_steward.store_parsed_file(
                 file_id=file_id,
                 parsed_file_data=parsed_data_bytes,
                 format_type=format_type,
@@ -568,8 +568,8 @@ class DataSolutionOrchestrator(OrchestratorBase):
             self.logger.info(f"📤 Orchestrating data exposure: file_id={file_id}")
             
             # Get parsed file
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "Content Steward service not available"
@@ -578,7 +578,7 @@ class DataSolutionOrchestrator(OrchestratorBase):
             # If parsed_file_id not provided, get it from file_id
             if not parsed_file_id:
                 # Get parsed files for this file_id
-                parsed_files = await content_steward.list_parsed_files(
+                parsed_files = await data_steward.list_parsed_files(
                     file_id=file_id,
                     user_context=user_context
                 )
@@ -591,7 +591,7 @@ class DataSolutionOrchestrator(OrchestratorBase):
                     "message": f"No parsed file found for file_id: {file_id}"
                 }
             
-            parsed_file = await content_steward.get_parsed_file(
+            parsed_file = await data_steward.get_parsed_file(
                 parsed_file_id=parsed_file_id,
                 user_context=user_context
             )

@@ -46,13 +46,15 @@ class ServiceProtocol(Protocol):
         """Get service capabilities and metadata."""
         ...
     
-    # Communication (NEW ARCHITECTURE - all services need these)
+    # Communication (OPTIONAL - only services that need communication implement these)
+    # Foundation services (infrastructure) don't need communication methods
+    # Realm services and Smart City services implement these via CommunicationMixin
     async def send_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Send message via Smart City communication APIs."""
+        """Send message via Smart City communication APIs (optional - not all services need this)."""
         ...
     
     async def publish_event(self, event: Dict[str, Any]) -> bool:
-        """Publish event via Smart City event APIs."""
+        """Publish event via Smart City event APIs (optional - not all services need this)."""
         ...
     
     # Infrastructure Access (all services need these)

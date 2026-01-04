@@ -119,13 +119,13 @@ class Initialization:
                 self.service.logger.info("🏛️ Initializing City Manager capabilities...")
             
             # Initialize Smart City service registry
+            # Note: Content Steward consolidated into Data Steward
             self.service.smart_city_services = {
                 "security_guard": {"status": "initialized", "instance": None},
                 "traffic_cop": {"status": "initialized", "instance": None},
                 "nurse": {"status": "initialized", "instance": None},
                 "librarian": {"status": "initialized", "instance": None},
                 "data_steward": {"status": "initialized", "instance": None},
-                "content_steward": {"status": "initialized", "instance": None},
                 "post_office": {"status": "initialized", "instance": None},
                 "conductor": {"status": "initialized", "instance": None}
             }

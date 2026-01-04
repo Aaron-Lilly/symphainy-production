@@ -37,7 +37,7 @@ class DataQualityValidationService(RealmServiceBase):
         
         # Smart City service APIs (will be initialized in initialize())
         self.data_steward = None
-        self.content_steward = None
+        self.data_steward = None
         self.nurse = None
     
     async def initialize(self) -> bool:
@@ -49,7 +49,7 @@ class DataQualityValidationService(RealmServiceBase):
             
             # Get Smart City services
             self.data_steward = await self.get_smart_city_service("DataStewardService")
-            self.content_steward = await self.get_smart_city_service("ContentStewardService")
+            self.data_steward = await self.get_smart_city_service("DataStewardService")
             self.nurse = await self.get_smart_city_service("NurseService")
             
             self.logger.info("✅ Data Quality Validation Service initialized successfully")

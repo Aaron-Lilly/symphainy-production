@@ -53,7 +53,7 @@ class SemanticEnrichmentService(RealmServiceBase):
         
         # Smart City service APIs (will be initialized in initialize())
         self.librarian = None
-        self.content_steward = None  # For retrieving parsed files (SECURE BOUNDARY)
+        self.data_steward = None  # For retrieving parsed files (SECURE BOUNDARY)
         self.nurse = None  # For observability
         
         # Initialize micro-modules

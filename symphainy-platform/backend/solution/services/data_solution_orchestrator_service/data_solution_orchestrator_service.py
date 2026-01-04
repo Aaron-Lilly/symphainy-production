@@ -260,6 +260,173 @@ class DataSolutionOrchestratorService(OrchestratorBase):
                     "required": ["session_id"]
                 },
                 "description": "Orchestrate Content Pillar summary compilation (data mash preview)"
+            },
+            # ========================================================================
+            # DATA CORRELATION METHODS (Phase 0.4 - Data as First-Class Citizen)
+            # ========================================================================
+            "correlate_client_data": {
+                "handler": self.correlate_client_data,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "correlation_id": {
+                            "type": "string",
+                            "description": "Primary correlation ID (UUID) - if not provided, generates one"
+                        },
+                        "workflow_id": {
+                            "type": "string",
+                            "description": "Optional workflow ID for workflow-specific correlation"
+                        },
+                        "file_id": {
+                            "type": "string",
+                            "description": "Optional file ID to correlate specific file"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context with correlation IDs"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Correlate client data with correlation_id and lineage (uses Data Steward as aggregation point)"
+            },
+            "correlate_semantic_data": {
+                "handler": self.correlate_semantic_data,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "correlation_id": {
+                            "type": "string",
+                            "description": "Primary correlation ID (UUID) - if not provided, generates one"
+                        },
+                        "workflow_id": {
+                            "type": "string",
+                            "description": "Optional workflow ID for workflow-specific correlation"
+                        },
+                        "content_id": {
+                            "type": "string",
+                            "description": "Optional content ID to correlate specific content"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context with correlation IDs"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Correlate semantic data with client data and platform data (uses Librarian as aggregation point)"
+            },
+            "correlate_platform_data": {
+                "handler": self.correlate_platform_data,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "correlation_id": {
+                            "type": "string",
+                            "description": "Primary correlation ID (UUID) - if not provided, generates one"
+                        },
+                        "workflow_id": {
+                            "type": "string",
+                            "description": "Optional workflow ID for workflow-specific correlation"
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Optional session ID for session-specific correlation"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context with correlation IDs"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Correlate platform data (workflow, events, telemetry) (uses Nurse as aggregation point)"
+            },
+            "get_correlated_data_mash": {
+                "handler": self.get_correlated_data_mash,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "correlation_id": {
+                            "type": "string",
+                            "description": "Primary correlation ID (UUID) - if not provided, generates one"
+                        },
+                        "workflow_id": {
+                            "type": "string",
+                            "description": "Optional workflow ID for workflow-specific correlation"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context with correlation IDs"
+                        }
+                    },
+                    "required": []
+                },
+                "description": "Get correlated data mash - virtual data composition layer (composes client, semantic, platform data)"
+            },
+            "track_data_lineage": {
+                "handler": self.track_data_lineage,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "source_id": {
+                            "type": "string",
+                            "description": "Source data entity ID (e.g., file_id)"
+                        },
+                        "target_id": {
+                            "type": "string",
+                            "description": "Target data entity ID (e.g., parsed_file_id)"
+                        },
+                        "operation": {
+                            "type": "string",
+                            "description": "Operation type (e.g., 'parse', 'embed', 'transform')"
+                        },
+                        "correlation_id": {
+                            "type": "string",
+                            "description": "Primary correlation ID (UUID) - if not provided, generates one"
+                        },
+                        "workflow_id": {
+                            "type": "string",
+                            "description": "Optional workflow ID for workflow-specific correlation"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context with correlation IDs"
+                        }
+                    },
+                    "required": ["source_id", "target_id", "operation"]
+                },
+                "description": "Track data lineage across all data types (records lineage relationships between data entities)"
+            },
+            "register_data_operation": {
+                "handler": self.register_data_operation,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "operation_type": {
+                            "type": "string",
+                            "description": "Type of operation (e.g., 'file_upload', 'file_parse', 'embedding_creation')"
+                        },
+                        "operation_data": {
+                            "type": "object",
+                            "description": "Operation data (e.g., {'file_id': '...', 'parsed_file_id': '...'})"
+                        },
+                        "correlation_id": {
+                            "type": "string",
+                            "description": "Primary correlation ID (UUID) - if not provided, generates one"
+                        },
+                        "workflow_id": {
+                            "type": "string",
+                            "description": "Optional workflow ID for workflow-specific correlation"
+                        },
+                        "user_context": {
+                            "type": "object",
+                            "description": "Optional user context with correlation IDs"
+                        }
+                    },
+                    "required": ["operation_type", "operation_data"]
+                },
+                "description": "Register data operation for correlation (called by data sources for automatic correlation)"
             }
         }
     
@@ -1997,5 +2164,556 @@ class DataSolutionOrchestratorService(OrchestratorBase):
                 "error_code": type(e).__name__,
                 "error_type": "unexpected_error",
                 "message": f"Request handling failed: {str(e)}"
+            }
+    
+    # ============================================================================
+    # DATA CORRELATION METHODS (Phase 0.4 - Data as First-Class Citizen)
+    # ============================================================================
+    # Key Principle: Data Solution Orchestrator does NOT perform data operations.
+    # It provides correlation services using Smart City services as aggregation points.
+    # ============================================================================
+    
+    async def correlate_client_data(
+        self,
+        correlation_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        file_id: Optional[str] = None,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Correlate client data with correlation_id and lineage.
+        
+        Uses Data Steward as aggregation point for client data.
+        Data Steward aggregates all client data operations (files, parsed files, metadata).
+        
+        Args:
+            correlation_id: Primary correlation ID (UUID) - if not provided, generates one
+            workflow_id: Optional workflow ID for workflow-specific correlation
+            file_id: Optional file ID to correlate specific file
+            user_context: Optional user context with correlation IDs
+        
+        Returns:
+            Dict with correlated client data:
+            {
+                "success": True,
+                "correlation_id": "...",
+                "client_data": {
+                    "files": [...],
+                    "parsed_files": [...],
+                    "lineage": [...]
+                },
+                "metadata": {
+                    "workflow_id": "...",
+                    "file_id": "...",
+                    "correlation_timestamp": "..."
+                }
+            }
+        """
+        try:
+            # Generate correlation_id if not provided
+            if not correlation_id:
+                correlation_id = str(uuid.uuid4())
+            
+            # Get Data Steward as aggregation point for client data
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
+                return {
+                    "success": False,
+                    "error": "Data Steward not available",
+                    "correlation_id": correlation_id
+                }
+            
+            # Query client data via Data Steward
+            client_data = {
+                "files": [],
+                "parsed_files": [],
+                "lineage": []
+            }
+            
+            # Get files if file_id provided, otherwise get all files for correlation
+            if file_id:
+                file_info = await data_steward.get_file(file_id, user_context)
+                if file_info:
+                    client_data["files"].append(file_info)
+                    
+                    # Get parsed files for this file
+                    parsed_files = await data_steward.list_parsed_files(file_id=file_id, user_context=user_context)
+                    client_data["parsed_files"] = parsed_files
+            else:
+                # Get all files for correlation (filtered by correlation_id if available)
+                files_result = await data_steward.list_files(filters={"correlation_id": correlation_id}, user_context=user_context)
+                if files_result.get("success"):
+                    client_data["files"] = files_result.get("files", [])
+            
+            # Get lineage for correlated data
+            if file_id:
+                lineage = await data_steward.get_lineage(file_id, user_context)
+                if lineage:
+                    client_data["lineage"] = lineage
+            
+            return {
+                "success": True,
+                "correlation_id": correlation_id,
+                "client_data": client_data,
+                "metadata": {
+                    "workflow_id": workflow_id,
+                    "file_id": file_id,
+                    "correlation_timestamp": json.dumps({"timestamp": str(uuid.uuid4())})  # Placeholder
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to correlate client data: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "correlation_id": correlation_id
+            }
+    
+    async def correlate_semantic_data(
+        self,
+        correlation_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        content_id: Optional[str] = None,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Correlate semantic data with client data and platform data.
+        
+        Uses Librarian as aggregation point for semantic data.
+        Librarian aggregates all semantic data operations (embeddings, metadata, knowledge graph).
+        
+        Args:
+            correlation_id: Primary correlation ID (UUID) - if not provided, generates one
+            workflow_id: Optional workflow ID for workflow-specific correlation
+            content_id: Optional content ID to correlate specific content
+            user_context: Optional user context with correlation IDs
+        
+        Returns:
+            Dict with correlated semantic data:
+            {
+                "success": True,
+                "correlation_id": "...",
+                "semantic_data": {
+                    "embeddings": [...],
+                    "metadata": {...},
+                    "knowledge_graph": {...}
+                },
+                "metadata": {
+                    "workflow_id": "...",
+                    "content_id": "...",
+                    "correlation_timestamp": "..."
+                }
+            }
+        """
+        try:
+            # Generate correlation_id if not provided
+            if not correlation_id:
+                correlation_id = str(uuid.uuid4())
+            
+            # Get Librarian as aggregation point for semantic data
+            librarian = await self.get_librarian_api()
+            if not librarian:
+                return {
+                    "success": False,
+                    "error": "Librarian not available",
+                    "correlation_id": correlation_id
+                }
+            
+            # Query semantic data via Librarian
+            semantic_data = {
+                "embeddings": [],
+                "metadata": {},
+                "knowledge_graph": {}
+            }
+            
+            # Get semantic embeddings if content_id provided
+            if content_id:
+                # Query embeddings via Librarian (semantic data abstraction)
+                # Note: This is a placeholder - actual implementation depends on Librarian API
+                semantic_data["embeddings"] = []  # Placeholder
+            
+            # Get metadata via Librarian
+            if content_id:
+                # Query metadata via Librarian
+                # Note: This is a placeholder - actual implementation depends on Librarian API
+                semantic_data["metadata"] = {}  # Placeholder
+            
+            return {
+                "success": True,
+                "correlation_id": correlation_id,
+                "semantic_data": semantic_data,
+                "metadata": {
+                    "workflow_id": workflow_id,
+                    "content_id": content_id,
+                    "correlation_timestamp": json.dumps({"timestamp": str(uuid.uuid4())})  # Placeholder
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to correlate semantic data: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "correlation_id": correlation_id
+            }
+    
+    async def correlate_platform_data(
+        self,
+        correlation_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Correlate platform data (workflow, events, telemetry).
+        
+        Uses Nurse as aggregation point for platform data.
+        Nurse aggregates all platform data operations (workflow state, events, telemetry, health metrics).
+        
+        Args:
+            correlation_id: Primary correlation ID (UUID) - if not provided, generates one
+            workflow_id: Optional workflow ID for workflow-specific correlation
+            session_id: Optional session ID for session-specific correlation
+            user_context: Optional user context with correlation IDs
+        
+        Returns:
+            Dict with correlated platform data:
+            {
+                "success": True,
+                "correlation_id": "...",
+                "platform_data": {
+                    "workflow_state": {...},
+                    "events": [...],
+                    "telemetry": {...},
+                    "health_metrics": {...}
+                },
+                "metadata": {
+                    "workflow_id": "...",
+                    "session_id": "...",
+                    "correlation_timestamp": "..."
+                }
+            }
+        """
+        try:
+            # Generate correlation_id if not provided
+            if not correlation_id:
+                correlation_id = str(uuid.uuid4())
+            
+            # Get Nurse as aggregation point for platform data
+            nurse = await self.get_nurse_api()
+            if not nurse:
+                return {
+                    "success": False,
+                    "error": "Nurse not available",
+                    "correlation_id": correlation_id
+                }
+            
+            # Query platform data via Nurse
+            platform_data = {
+                "workflow_state": {},
+                "events": [],
+                "telemetry": {},
+                "health_metrics": {}
+            }
+            
+            # Get workflow state if workflow_id provided
+            if workflow_id:
+                conductor = await self.get_conductor_api()
+                if conductor:
+                    # Query workflow state via Conductor
+                    # Note: This is a placeholder - actual implementation depends on Conductor API
+                    platform_data["workflow_state"] = {}  # Placeholder
+            
+            # Get events if correlation_id provided
+            if correlation_id:
+                post_office = await self.get_post_office_api()
+                if post_office:
+                    # Query events via Post Office
+                    # Note: This is a placeholder - actual implementation depends on Post Office API
+                    platform_data["events"] = []  # Placeholder
+            
+            # Get telemetry and health metrics via Nurse
+            # Note: This is a placeholder - actual implementation depends on Nurse API
+            platform_data["telemetry"] = {}  # Placeholder
+            platform_data["health_metrics"] = {}  # Placeholder
+            
+            return {
+                "success": True,
+                "correlation_id": correlation_id,
+                "platform_data": platform_data,
+                "metadata": {
+                    "workflow_id": workflow_id,
+                    "session_id": session_id,
+                    "correlation_timestamp": json.dumps({"timestamp": str(uuid.uuid4())})  # Placeholder
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to correlate platform data: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "correlation_id": correlation_id
+            }
+    
+    async def get_correlated_data_mash(
+        self,
+        correlation_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get correlated data mash - virtual data composition layer.
+        
+        Composes all three data types (client, semantic, platform) via their aggregation points:
+        - Client Data: Data Steward
+        - Semantic Data: Librarian
+        - Platform Data: Nurse
+        
+        Args:
+            correlation_id: Primary correlation ID (UUID) - if not provided, generates one
+            workflow_id: Optional workflow ID for workflow-specific correlation
+            user_context: Optional user context with correlation IDs
+        
+        Returns:
+            Dict with correlated data mash:
+            {
+                "success": True,
+                "correlation_id": "...",
+                "data_mash": {
+                    "client_data": {...},
+                    "semantic_data": {...},
+                    "platform_data": {...}
+                },
+                "correlation": {
+                    "workflow_ids": [...],
+                    "file_ids": [...],
+                    "content_ids": [...]
+                }
+            }
+        """
+        try:
+            # Generate correlation_id if not provided
+            if not correlation_id:
+                correlation_id = str(uuid.uuid4())
+            
+            # Correlate all three data types
+            client_data_result = await self.correlate_client_data(
+                correlation_id=correlation_id,
+                workflow_id=workflow_id,
+                user_context=user_context
+            )
+            
+            semantic_data_result = await self.correlate_semantic_data(
+                correlation_id=correlation_id,
+                workflow_id=workflow_id,
+                user_context=user_context
+            )
+            
+            platform_data_result = await self.correlate_platform_data(
+                correlation_id=correlation_id,
+                workflow_id=workflow_id,
+                user_context=user_context
+            )
+            
+            # Extract correlation IDs from results
+            correlation = {
+                "workflow_ids": [workflow_id] if workflow_id else [],
+                "file_ids": [],
+                "content_ids": []
+            }
+            
+            # Extract file_ids from client_data
+            if client_data_result.get("success"):
+                client_data = client_data_result.get("client_data", {})
+                files = client_data.get("files", [])
+                for file in files:
+                    file_id = file.get("uuid") or file.get("file_id")
+                    if file_id:
+                        correlation["file_ids"].append(file_id)
+            
+            # Extract content_ids from semantic_data
+            if semantic_data_result.get("success"):
+                semantic_data = semantic_data_result.get("semantic_data", {})
+                # Note: Extract content_ids from semantic_data when available
+                correlation["content_ids"] = []  # Placeholder
+            
+            return {
+                "success": True,
+                "correlation_id": correlation_id,
+                "data_mash": {
+                    "client_data": client_data_result.get("client_data", {}),
+                    "semantic_data": semantic_data_result.get("semantic_data", {}),
+                    "platform_data": platform_data_result.get("platform_data", {})
+                },
+                "correlation": correlation
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get correlated data mash: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "correlation_id": correlation_id
+            }
+    
+    async def track_data_lineage(
+        self,
+        source_id: str,
+        target_id: str,
+        operation: str,
+        correlation_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Track data lineage across all data types.
+        
+        Records lineage relationships between data entities (files, parsed files, embeddings, etc.)
+        using Data Steward's lineage tracking capabilities.
+        
+        Args:
+            source_id: Source data entity ID (e.g., file_id)
+            target_id: Target data entity ID (e.g., parsed_file_id)
+            operation: Operation type (e.g., "parse", "embed", "transform")
+            correlation_id: Primary correlation ID (UUID) - if not provided, generates one
+            workflow_id: Optional workflow ID for workflow-specific correlation
+            user_context: Optional user context with correlation IDs
+        
+        Returns:
+            Dict with lineage tracking result:
+            {
+                "success": True,
+                "lineage_id": "...",
+                "correlation_id": "...",
+                "lineage": {
+                    "source_id": "...",
+                    "target_id": "...",
+                    "operation": "...",
+                    "timestamp": "..."
+                }
+            }
+        """
+        try:
+            # Generate correlation_id if not provided
+            if not correlation_id:
+                correlation_id = str(uuid.uuid4())
+            
+            # Get Data Steward for lineage tracking
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
+                return {
+                    "success": False,
+                    "error": "Data Steward not available",
+                    "correlation_id": correlation_id
+                }
+            
+            # Record lineage via Data Steward
+            lineage_data = {
+                "source_id": source_id,
+                "target_id": target_id,
+                "operation": operation,
+                "correlation_id": correlation_id,
+                "workflow_id": workflow_id,
+                "timestamp": json.dumps({"timestamp": str(uuid.uuid4())})  # Placeholder
+            }
+            
+            lineage_id = await data_steward.record_lineage(lineage_data, user_context)
+            
+            return {
+                "success": True,
+                "lineage_id": lineage_id,
+                "correlation_id": correlation_id,
+                "lineage": lineage_data
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to track data lineage: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "correlation_id": correlation_id
+            }
+    
+    async def register_data_operation(
+        self,
+        operation_type: str,
+        operation_data: Dict[str, Any],
+        correlation_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Register data operation for correlation.
+        
+        Called by data sources (ContentJourneyOrchestrator, etc.) to register data operations
+        for automatic correlation. This enables transparent correlation without explicit calls.
+        
+        Args:
+            operation_type: Type of operation (e.g., "file_upload", "file_parse", "embedding_creation")
+            operation_data: Operation data (e.g., {"file_id": "...", "parsed_file_id": "..."})
+            correlation_id: Primary correlation ID (UUID) - if not provided, generates one
+            workflow_id: Optional workflow ID for workflow-specific correlation
+            user_context: Optional user context with correlation IDs
+        
+        Returns:
+            Dict with registration result:
+            {
+                "success": True,
+                "correlation_id": "...",
+                "operation_id": "...",
+                "registered_at": "..."
+            }
+        """
+        try:
+            # Generate correlation_id if not provided
+            if not correlation_id:
+                correlation_id = str(uuid.uuid4())
+            
+            # Extract IDs from operation_data for correlation
+            file_id = operation_data.get("file_id")
+            parsed_file_id = operation_data.get("parsed_file_id")
+            content_id = operation_data.get("content_id")
+            
+            # Track lineage if source and target IDs available
+            if file_id and parsed_file_id:
+                await self.track_data_lineage(
+                    source_id=file_id,
+                    target_id=parsed_file_id,
+                    operation=operation_type,
+                    correlation_id=correlation_id,
+                    workflow_id=workflow_id,
+                    user_context=user_context
+                )
+            
+            # Register operation with platform correlation
+            operation_id = str(uuid.uuid4())
+            
+            # Log operation registration
+            await self._realm_service.log_operation_with_telemetry(
+                "data_operation_registered",
+                success=True,
+                details={
+                    "operation_type": operation_type,
+                    "operation_id": operation_id,
+                    "correlation_id": correlation_id,
+                    "workflow_id": workflow_id
+                }
+            )
+            
+            return {
+                "success": True,
+                "correlation_id": correlation_id,
+                "operation_id": operation_id,
+                "registered_at": json.dumps({"timestamp": str(uuid.uuid4())})  # Placeholder
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to register data operation: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "correlation_id": correlation_id
             }
 

@@ -1717,10 +1717,13 @@ class FrontendGatewayService(RealmServiceBase):
         """
         Simplified pillar-based request router.
         
-        Routes requests directly to Journey Orchestrators based on pillar name.
-        Journey Orchestrators handle internal routing to specific handlers.
+        Per Phase 0.5 Architecture Contract: Routes requests to Solution Orchestrators
+        (entry points with platform correlation), not Journey Orchestrators directly.
         
-        This replaces the complex route discovery/matching with simple, direct routing.
+        Solution Orchestrators are entry points that:
+        1. Orchestrate platform correlation (Security Guard, Traffic Cop, Conductor, Post Office, Nurse)
+        2. Delegate to Journey Orchestrators for operations
+        3. Ensure correlation_id propagation throughout the request lifecycle
         
         Args:
             request: Frontend request data
@@ -1750,17 +1753,33 @@ class FrontendGatewayService(RealmServiceBase):
             user_permissions = headers.get("X-User-Permissions", "").split(",") if headers.get("X-User-Permissions") else request.get("params", {}).get("permissions", [])
             session_token = headers.get("X-Session-Token") or headers.get("x-session-token") or request.get("params", {}).get("session_token")
             
-            # ✅ Phase 0.5: Generate workflow_id at gateway entry point (if not provided)
-            # Frontend can send X-Workflow-Id header for multi-step operations
-            # If not provided, generate new workflow_id for this request
+            # ✅ Phase 0.5: Generate correlation_id at gateway entry point (if not provided)
+            # Per Phase 0.4 Architecture Contract: Use correlation_id (UUID) as primary correlation field
+            # Frontend can send X-Correlation-Id header for multi-step operations
+            # If not provided, generate new correlation_id for this request
             # Priority: params (JSON body) > headers > generate new UUID
-            # Check params first (request body) since that's where the test passes workflow_id
-            workflow_id = (
-                request.get("params", {}).get("workflow_id") or  # ✅ Check request body (JSON params) FIRST
+            # Check params first (request body) since that's where the test passes correlation_id
+            # Also support legacy workflow_id for backward compatibility (optional)
+            correlation_id = (
+                request.get("params", {}).get("correlation_id") or  # ✅ Check request body (JSON params) FIRST
+                request.get("correlation_id") or 
+                headers.get("X-Correlation-Id") or 
+                headers.get("x-correlation-id") or
+                # Legacy workflow_id support (backward compatibility)
+                request.get("params", {}).get("workflow_id") or
                 request.get("workflow_id") or 
                 headers.get("X-Workflow-Id") or 
                 headers.get("x-workflow-id") or
                 str(uuid.uuid4())
+            )
+            
+            # Optional workflow_id (for workflow-specific operations)
+            workflow_id = (
+                request.get("params", {}).get("workflow_id") or
+                request.get("workflow_id") or 
+                headers.get("X-Workflow-Id") or 
+                headers.get("x-workflow-id") or
+                None  # Optional - not all operations have workflows
             )
             
             # ✅ CRITICAL FIX: Preserve permissions from original request.user_context (from universal_pillar_router)
@@ -1788,7 +1807,8 @@ class FrontendGatewayService(RealmServiceBase):
                 "user_id": user_id,
                 "tenant_id": tenant_id,
                 "session_id": session_token,
-                "workflow_id": workflow_id,  # ✅ Phase 0.5: Add workflow_id for correlation
+                "correlation_id": correlation_id,  # ✅ Phase 0.4: Primary correlation ID (UUID)
+                "workflow_id": workflow_id,  # ✅ Phase 0.4: Optional workflow ID (for workflow-specific operations)
                 "email": user_email,
                 "roles": user_roles,
                 "permissions": user_permissions  # ✅ This should now have permissions from original user_context
@@ -1798,11 +1818,13 @@ class FrontendGatewayService(RealmServiceBase):
             from utilities.security_authorization.request_context import set_request_user_context
             set_request_user_context(user_context)
             
-            # Add user_context and workflow_id to request for propagation
+            # Add user_context and correlation_id to request for propagation
             request["user_context"] = user_context
             if "params" not in request:
                 request["params"] = {}
-            request["params"]["workflow_id"] = workflow_id
+            request["params"]["correlation_id"] = correlation_id
+            if workflow_id:
+                request["params"]["workflow_id"] = workflow_id  # Optional workflow_id
             
             # Add tenant context to request params if not already present
             if tenant_id and "tenant_id" not in request.get("params", {}):
@@ -1975,37 +1997,39 @@ class FrontendGatewayService(RealmServiceBase):
     
     async def _get_orchestrator_for_pillar(self, pillar: str) -> Optional[Any]:
         """
-        Get Journey Orchestrator for a pillar using simplified discovery.
+        Get Solution Orchestrator for a pillar using simplified discovery.
+        
+        Per Phase 0.5 Architecture Contract: Frontend Gateway MUST route to Solution Orchestrators
+        (entry points with platform correlation), not Journey Orchestrators directly.
         
         Special handling:
         - "session" pillar: Handled directly by FrontendGatewayService (returns self)
-        - Other pillars: Discovered via Curator
+        - Other pillars: Route to Solution Orchestrators (entry points)
         
         Args:
             pillar: Pillar name (e.g., "content-pillar", "insights-pillar", "session")
         
         Returns:
-            Orchestrator instance (or self for session pillar) or None if not found
+            Solution Orchestrator instance (or self for session pillar) or None if not found
         """
         # Special case: session pillar is handled directly by FrontendGatewayService
         if pillar == "session":
             self.logger.info(f"✅ Session pillar - handled directly by FrontendGatewayService")
             return self  # Return self so handle_request can route to session handlers
         
-        # Pillar → Orchestrator mapping
+        # Pillar → Solution Orchestrator mapping (Per Phase 0.5 Architecture Contract)
+        # ALL pillars route to Solution Orchestrators (entry points with platform correlation)
         pillar_map = {
-            "mvp-solution": "MVPSolutionOrchestratorService",  # NEW: MVP Solution entry point (Solution → Journey → Realm)
-            "content-pillar": "ContentJourneyOrchestrator",
-            "insights-solution": "InsightsSolutionOrchestratorService",  # New pattern (Solution → Journey → Realm)
-            "data-solution": "DataSolutionOrchestratorService",  # Phase 4: Data Mash (Solution → Journey → Realm)
-            "operations-solution": "OperationsSolutionOrchestratorService",  # NEW: Operations Solution Orchestrator (Solution → Journey → Realm)
-            "operations-pillar": "OperationsOrchestrator",  # Legacy - use operations-solution instead
-            "business-outcomes-solution": "BusinessOutcomesSolutionOrchestratorService",  # NEW: Business Outcomes Solution Orchestrator (Solution → Journey → Realm)
-            "business-outcomes-pillar": "BusinessOutcomesOrchestrator",  # Legacy - use business-outcomes-solution instead
+            "mvp-solution": "MVPSolutionOrchestratorService",  # MVP Solution entry point
+            "content-pillar": "ContentSolutionOrchestratorService",  # ✅ FIXED: Route to Content Solution Orchestrator (follows Solution → Journey → Realm pattern)
+            "data-solution": "DataSolutionOrchestratorService",  # Data Solution entry point
+            "insights-solution": "InsightsSolutionOrchestratorService",  # Insights Solution entry point
+            "insights-pillar": "InsightsSolutionOrchestratorService",  # ✅ FIXED: Route to Insights Solution Orchestrator (not InsightsOrchestrator)
+            "operations-solution": "OperationsSolutionOrchestratorService",  # Operations Solution entry point
+            "operations-pillar": "OperationsSolutionOrchestratorService",  # ✅ FIXED: Route to Operations Solution Orchestrator (not OperationsOrchestrator)
+            "business-outcomes-solution": "BusinessOutcomesSolutionOrchestratorService",  # Business Outcomes Solution entry point
+            "business-outcomes-pillar": "BusinessOutcomesSolutionOrchestratorService",  # ✅ FIXED: Route to Business Outcomes Solution Orchestrator (not BusinessOutcomesOrchestrator)
         }
-        
-        # Legacy pillar mapping (removed - use insights-solution instead)
-        # "insights-pillar": "InsightsOrchestrator" - REMOVED: Use insights-solution
         
         orchestrator_name = pillar_map.get(pillar)
         if not orchestrator_name:
@@ -2022,32 +2046,10 @@ class FrontendGatewayService(RealmServiceBase):
             orchestrator = await curator.discover_service_by_name(orchestrator_name)
             if not orchestrator:
                 self.logger.warning(f"⚠️ {orchestrator_name} not found via Curator")
-                # Fallback: Try direct import for Solution Orchestrators and Journey Orchestrators
-                if orchestrator_name == "ContentJourneyOrchestrator":
-                    try:
-                        # Force reload the module to get the latest code
-                        import importlib
-                        import backend.journey.orchestrators.content_journey_orchestrator.content_orchestrator as content_module
-                        importlib.reload(content_module)
-                        ContentJourneyOrchestrator = content_module.ContentJourneyOrchestrator
-                        
-                        orchestrator = ContentJourneyOrchestrator(
-                            platform_gateway=self.platform_gateway,
-                            di_container=self.di_container
-                        )
-                        await orchestrator.initialize()
-                        self.logger.info(f"✅ {orchestrator_name} initialized directly as fallback")
-                        # Verify the method exists
-                        if hasattr(orchestrator, 'handle_request'):
-                            self.logger.info(f"✅ Verified: {orchestrator_name} has handle_request method")
-                        else:
-                            self.logger.warning(f"⚠️ {orchestrator_name} does not have handle_request method")
-                    except Exception as e:
-                        self.logger.error(f"❌ Failed to initialize {orchestrator_name} as fallback: {e}")
-                        import traceback
-                        self.logger.error(f"   Traceback: {traceback.format_exc()}")
-                        return None
-                elif orchestrator_name == "OperationsSolutionOrchestratorService":
+                # Fallback: Try direct import for Solution Orchestrators
+                # Note: Per Phase 0.5 Architecture Contract, all pillars route to Solution Orchestrators
+                # ContentJourneyOrchestrator fallback removed - content-pillar now routes to ContentSolutionOrchestratorService (follows Solution → Journey → Realm pattern)
+                if orchestrator_name == "OperationsSolutionOrchestratorService":
                     try:
                         # Force reload the module to get the latest code
                         import importlib

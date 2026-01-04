@@ -183,7 +183,13 @@ class OrchestratorBase(ABC):
         return await self._realm_service.get_librarian_api()
     
     async def get_content_steward_api(self) -> Optional[Any]:
-        """Delegate to RealmServiceBase for Content Steward access."""
+        """
+        Delegate to RealmServiceBase for Content Steward access.
+        
+        DEPRECATED: Content Steward has been consolidated into Data Steward.
+        This method now returns Data Steward for backward compatibility.
+        New code should use get_data_steward_api() instead.
+        """
         return await self._realm_service.get_content_steward_api()
     
     async def get_data_steward_api(self) -> Optional[Any]:

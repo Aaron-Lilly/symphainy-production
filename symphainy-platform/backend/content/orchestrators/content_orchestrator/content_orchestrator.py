@@ -875,9 +875,9 @@ class ContentOrchestrator(OrchestratorBase):
                 
             # Use Content Steward for proper file storage (GCS + Supabase)
             # Access via OrchestratorBase (delegates to RealmServiceBase)
-            content_steward = await self.get_content_steward_api()
+            data_steward = await self.get_data_steward_api()
             
-            if not content_steward:
+            if not data_steward:
                 raise Exception("Content Steward service not available - file upload requires infrastructure")
             
             # Prepare metadata for Content Steward with proper field names
@@ -901,7 +901,7 @@ class ContentOrchestrator(OrchestratorBase):
                 "size_bytes": len(file_data)
             }
                 
-            upload_result = await content_steward.process_upload(file_data, file_type, metadata)
+            upload_result = await data_steward.process_upload(file_data, file_type, metadata)
             
             # Extract file_id from result
             file_uuid = upload_result.get("uuid") or upload_result.get("file_id")
@@ -1128,12 +1128,12 @@ class ContentOrchestrator(OrchestratorBase):
                     
                     if parquet_bytes:
                         # Get Content Steward API
-                        content_steward = await self.get_content_steward_api()
-                        if content_steward:
+                        data_steward = await self.get_data_steward_api()
+                        if data_steward:
                             # ✅ Use request-scoped context (no need to pass user_context)
                             # store_parsed_file will get context from request_context automatically
                             # Store parsed file via Content Steward
-                            store_result = await content_steward.store_parsed_file(
+                            store_result = await data_steward.store_parsed_file(
                                 file_id=file_id,
                                 parsed_file_data=parquet_bytes,
                                 format_type="parquet",

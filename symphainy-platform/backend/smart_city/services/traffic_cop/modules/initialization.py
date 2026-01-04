@@ -152,8 +152,20 @@ class Initialization:
                 "/api/v1/analytics": {"method": "GET", "service": "analytics"}
             }
             
-            # Initialize WebSocket connections
-            self.service.websocket_connections = {}
+            # Initialize WebSocket Connection Registry (Redis-backed for horizontal scaling)
+            if self.service.messaging_abstraction:
+                try:
+                    from backend.smart_city.services.traffic_cop.connection_registry import TrafficCopConnectionRegistry
+                    self.service.websocket_connection_registry = TrafficCopConnectionRegistry(
+                        self.service.messaging_abstraction
+                    )
+                    self.service._log("info", "✅ WebSocket Connection Registry initialized (Redis-backed)")
+                except Exception as e:
+                    self.service._log("error", f"❌ Failed to initialize WebSocket Connection Registry: {e}")
+                    self.service.websocket_connection_registry = None
+            else:
+                self.service._log("warning", "⚠️ Messaging abstraction not available - WebSocket Connection Registry not initialized")
+                self.service.websocket_connection_registry = None
             
             self.service._log("info", "✅ Traffic Cop capabilities initialized")
             

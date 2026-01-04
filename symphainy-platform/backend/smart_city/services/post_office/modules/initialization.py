@@ -33,6 +33,21 @@ class Initialization:
             if not self.service.event_management_abstraction:
                 raise Exception("Event Management Abstraction not available")
             
+            # Initialize EventBusFoundationService (Post Office owns event bus)
+            # EventBusFoundationService provides stable API while allowing infrastructure swapping
+            try:
+                event_bus_foundation = self.service.di_container.get_foundation_service("EventBusFoundationService")
+                if event_bus_foundation:
+                    # Initialize EventBusFoundationService if not already initialized
+                    if not event_bus_foundation.is_initialized:
+                        await event_bus_foundation.initialize()
+                    self.service.event_bus_foundation = event_bus_foundation
+                    self.service.logger.info("✅ EventBusFoundationService initialized (Post Office owns event bus)")
+                else:
+                    self.service.logger.warning("⚠️ EventBusFoundationService not available - using event_management_abstraction directly")
+            except Exception as e:
+                self.service.logger.warning(f"⚠️ Failed to initialize EventBusFoundationService: {e} - using event_management_abstraction directly")
+            
             self.service.session_abstraction = self.service.get_session_abstraction()
             if not self.service.session_abstraction:
                 raise Exception("Session Abstraction not available")

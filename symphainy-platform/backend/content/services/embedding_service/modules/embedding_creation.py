@@ -23,9 +23,12 @@ class EmbeddingCreation:
         sample_values: List[str]
     ) -> str:
         """
-        Infer semantic meaning of a column using LLM reasoning.
+        Infer semantic meaning of a column using agent-based LLM reasoning.
         
-        Uses LLM to analyze column name, data type, and sample values
+        CRITICAL: Uses agent via Agentic Foundation SDK (NO direct LLM access).
+        This enforces governance, traceability, and cost control.
+        
+        Uses agent to analyze column name, data type, and sample values
         to infer the semantic meaning of the column.
         
         Args:
@@ -37,13 +40,13 @@ class EmbeddingCreation:
             Semantic meaning text (e.g., "Customer email address" instead of just "email")
         """
         try:
-            if not self.service.llm_abstraction:
-                # Fallback to column name if LLM not available
+            if not self.service.semantic_meaning_agent:
+                # Fallback to column name if agent not available
                 return f"Column: {column_name}"
             
-            from foundations.public_works_foundation.abstraction_contracts.llm_protocol import LLMRequest, LLMModel
-            
-            system_prompt = """You are a data analyst inferring the semantic meaning of database columns.
+            # Use agent for semantic meaning inference (via Agentic Foundation SDK)
+            # CRITICAL: Use agent's _call_llm_simple method which handles tracking and governance
+            system_message = """You are a data analyst inferring the semantic meaning of database columns.
 
 Analyze the column name, data type, and sample values to determine what the column represents.
 
@@ -63,30 +66,34 @@ Sample values: {samples_str}
 
 What does this column represent? Return ONLY a concise description (1-5 words)."""
             
-            llm_request = LLMRequest(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                model=LLMModel.GPT_4O_MINI,
-                max_tokens=30,
-                temperature=0.3,
-                metadata={"task": "infer_semantic_meaning", "column": column_name}
-            )
-            
-            llm_response = await self.service.llm_abstraction.generate_response(llm_request)
-            response_text = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
-            
-            # Clean up response
-            meaning = response_text.strip()
-            if not meaning or len(meaning) < 2:
-                # Fallback to column name if response is too short
-                meaning = f"Column: {column_name}"
-            
-            return meaning
+            # Use agent's _call_llm_simple method (via Agentic Foundation SDK)
+            # This ensures proper governance, traceability, and cost control
+            try:
+                # Use agent's async LLM call method with tracking
+                response_text = await self.service.semantic_meaning_agent._call_llm_simple(
+                    prompt=user_prompt,
+                    system_message=system_message,
+                    model="gpt-4o-mini",
+                    max_tokens=30,
+                    temperature=0.3,
+                    user_context=None,
+                    metadata={"task": "infer_semantic_meaning", "column": column_name}
+                )
+                
+                # Clean up response
+                meaning = response_text.strip() if isinstance(response_text, str) else str(response_text).strip()
+                if not meaning or len(meaning) < 2:
+                    # Fallback to column name if response is too short
+                    meaning = f"Column: {column_name}"
+                
+                return meaning
+                
+            except Exception as agent_error:
+                self.logger.warning(f"⚠️ Agent-based semantic meaning inference failed for {column_name}: {agent_error}, using column name")
+                return f"Column: {column_name}"
             
         except Exception as e:
-            self.logger.warning(f"⚠️ Failed to infer semantic meaning via LLM for {column_name}: {e}, using column name")
+            self.logger.warning(f"⚠️ Failed to infer semantic meaning via agent for {column_name}: {e}, using column name")
             return f"Column: {column_name}"
     
     async def create_representative_embeddings(
@@ -140,16 +147,17 @@ What does this column represent? Return ONLY a concise description (1-5 words)."
                     user_context=user_context
                 )
             
-            # Step 1: Retrieve parsed parquet file from Content Steward (PRIMARY PATHWAY - REQUIRED)
-            if not self.service.content_steward:
-                raise ValueError("Content Steward not available - cannot retrieve parsed file. This is required for embedding creation.")
+            # Step 1: Retrieve parsed parquet file from Data Steward (PRIMARY PATHWAY - REQUIRED)
+            # Note: Content Steward consolidated into Data Steward
+            if not self.service.data_steward:
+                raise ValueError("Data Steward not available - cannot retrieve parsed file. This is required for embedding creation.")
             
             try:
                 # ✅ Use get_parsed_file() which looks up metadata and retrieves the actual GCS file
                 # ✅ CLARIFIED: parsed_file_id IS the GCS file UUID (stored in parsed_data_files.parsed_file_id)
                 # The parsed file is stored in GCS with this UUID, and metadata is stored in parsed_data_files table
                 # This UUID is returned from store_parsed_file() and used consistently throughout the platform
-                parsed_file_result = await self.service.content_steward.get_parsed_file(parsed_file_id)
+                parsed_file_result = await self.service.data_steward.get_parsed_file(parsed_file_id)
                 if not parsed_file_result:
                     raise ValueError(f"Parsed file not found: {parsed_file_id}. File must be parsed and saved before embeddings can be created.")
                 

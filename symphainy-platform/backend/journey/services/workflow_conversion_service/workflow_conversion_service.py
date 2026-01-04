@@ -37,7 +37,7 @@ class WorkflowConversionService(RealmServiceBase):
         
         # Will be initialized in initialize()
         self.librarian = None
-        self.content_steward = None
+        self.data_steward = None
     
     async def initialize(self) -> bool:
         """
@@ -60,7 +60,7 @@ class WorkflowConversionService(RealmServiceBase):
         try:
             # Get Smart City services
             self.librarian = await self.get_librarian_api()
-            self.content_steward = await self.get_content_steward_api()
+            self.data_steward = await self.get_data_steward_api()
             
             # Register with Curator (Phase 2 pattern)
             await self.register_with_curator(

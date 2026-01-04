@@ -86,6 +86,8 @@ class DataStewardService(SmartCityRoleBase, DataStewardServiceProtocol):
         # Initialize micro-modules
         self.initialization_module = Initialization(self)
         self.file_lifecycle_module = FileLifecycle(self)  # ⭐ NEW: File lifecycle from Content Steward
+        from .modules.parsed_file_processing import ParsedFileProcessing
+        self.parsed_file_processing_module = ParsedFileProcessing(self)  # ⭐ NEW: Parsed file processing from Content Steward
         self.policy_management_module = PolicyManagement(self)
         self.lineage_tracking_module = LineageTracking(self)
         self.quality_compliance_module = QualityCompliance(self)
@@ -233,6 +235,41 @@ class DataStewardService(SmartCityRoleBase, DataStewardServiceProtocol):
     ) -> Dict[str, Any]:
         """List files with optional filters."""
         return await self.file_lifecycle_module.list_files(filters, user_context)
+    
+    # ============================================================================
+    # PARSED FILE METHODS (from Content Steward consolidation)
+    # ============================================================================
+    
+    async def store_parsed_file(
+        self,
+        file_id: str,
+        parsed_file_data: bytes,
+        format_type: str,
+        content_type: str,
+        parse_result: Dict[str, Any],
+        workflow_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Store parsed file in GCS and metadata in Supabase parsed_data_files table."""
+        return await self.parsed_file_processing_module.store_parsed_file(
+            file_id, parsed_file_data, format_type, content_type, parse_result, workflow_id
+        )
+    
+    async def get_parsed_file(
+        self,
+        parsed_file_id: str,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Get parsed file data and metadata."""
+        return await self.parsed_file_processing_module.get_parsed_file(parsed_file_id, user_context)
+    
+    async def list_parsed_files(
+        self,
+        file_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """List parsed files for a given original file or for a user."""
+        return await self.parsed_file_processing_module.list_parsed_files(file_id, user_id, user_context)
     
     # ============================================================================
     # DATA GOVERNANCE METHODS

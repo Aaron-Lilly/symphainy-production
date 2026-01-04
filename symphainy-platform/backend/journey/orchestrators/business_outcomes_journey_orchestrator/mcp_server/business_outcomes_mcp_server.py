@@ -240,3 +240,6 @@ class BusinessOutcomesMCPServer(MCPServerBase):
                 "error_type": type(e).__name__
             }
 
+
+
+

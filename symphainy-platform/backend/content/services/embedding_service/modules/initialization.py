@@ -18,9 +18,10 @@ class Initialization:
         Initialize Embedding Service dependencies.
         
         Sets up:
-        - Smart City service APIs (Librarian, Content Steward, SemanticDataAbstraction)
+        - Smart City service APIs (Librarian, Data Steward, SemanticDataAbstraction)
         - StatelessHFInferenceAgent (for embedding generation)
         - Nurse (for observability)
+        Note: Content Steward consolidated into Data Steward
         """
         try:
             self.logger.info("🚀 Initializing Embedding Service...")
@@ -28,17 +29,17 @@ class Initialization:
             # Get Smart City service APIs (use same pattern as FileParserService)
             # Business Enablement services should use Smart City SOA APIs via helper methods
             self.service.librarian = await self.service.get_librarian_api()
-            self.service.content_steward = await self.service.get_content_steward_api()
+            # Note: Content Steward consolidated into Data Steward
             self.service.data_steward = await self.service.get_data_steward_api()
             # Get SemanticDataAbstraction via Platform Gateway (Content realm now has access)
             self.service.semantic_data = self.service.get_abstraction("semantic_data")
             self.service.nurse = await self.service.get_nurse_api()
             
             # Log discovery results for debugging
-            if not self.service.content_steward:
-                self.logger.warning("⚠️ Content Steward API not discovered via Curator - file retrieval may fail")
+            if not self.service.data_steward:
+                self.logger.warning("⚠️ Data Steward API not discovered via Curator - file retrieval may fail")
             else:
-                self.logger.info(f"✅ Content Steward API discovered: {type(self.service.content_steward).__name__}")
+                self.logger.info(f"✅ Data Steward API discovered: {type(self.service.data_steward).__name__}")
             
             if not self.service.semantic_data:
                 self.logger.error("❌ SemanticDataAbstraction not available - embeddings cannot be stored")
@@ -93,19 +94,56 @@ class Initialization:
                 self.logger.error("❌ HuggingFaceAdapter not available - EmbeddingService cannot function without it")
                 return False
             
-            # Get LLM abstraction for semantic meaning inference (optional but recommended)
+            # Get agent for semantic meaning inference (via Agentic Foundation SDK - NO direct LLM access)
+            # CRITICAL RULE: LLMs must ONLY be accessed via agents (for governance, traceability, and cost control)
             try:
-                public_works_foundation = await self.service.get_foundation_service("PublicWorksFoundationService")
-                if public_works_foundation:
-                    self.service.llm_abstraction = public_works_foundation.get_abstraction("llm")
-                    if self.service.llm_abstraction:
-                        self.logger.info("✅ LLM abstraction initialized for semantic meaning inference")
+                agentic_foundation = await self.service.get_foundation_service("AgenticFoundationService")
+                if agentic_foundation:
+                    # Create a lightweight agent for semantic meaning inference
+                    from foundations.agentic_foundation.agent_sdk.lightweight_llm_agent import LightweightLLMAgent
+                    from foundations.agentic_foundation.agui_schema_registry import AGUISchema, AGUIComponent
+                    
+                    # Create simple AGUI schema for semantic meaning inference
+                    agui_schema = AGUISchema(
+                        agent_name="SemanticMeaningInferenceAgent",
+                        version="1.0.0",
+                        description="Agent for inferring semantic meaning of database columns",
+                        components=[
+                            AGUIComponent(
+                                type="text_output",
+                                title="Semantic Meaning",
+                                description="The inferred semantic meaning of the column",
+                                required=True,
+                                properties={
+                                    "semantic_meaning": "The semantic meaning text (1-5 words)"
+                                }
+                            )
+                        ],
+                        metadata={"task": "semantic_meaning_inference"}
+                    )
+                    
+                    # Create lightweight agent via Agentic Foundation SDK
+                    self.service.semantic_meaning_agent = await agentic_foundation.create_agent(
+                        agent_class=LightweightLLMAgent,
+                        agent_name="SemanticMeaningInferenceAgent",
+                        agent_type="specialist",
+                        realm_name="content",
+                        di_container=self.service.di_container,
+                        orchestrator=None,
+                        user_context=None,
+                        capabilities=["semantic_meaning_inference"],
+                        required_roles=[],
+                        agui_schema=agui_schema
+                    )
+                    
+                    if self.service.semantic_meaning_agent:
+                        self.logger.info("✅ Semantic meaning inference agent initialized (via Agentic Foundation SDK)")
                     else:
-                        self.logger.warning("⚠️ LLM abstraction not available - will use column name as semantic meaning")
+                        self.logger.warning("⚠️ Semantic meaning inference agent not available - will use column name as semantic meaning")
                 else:
-                    self.logger.warning("⚠️ PublicWorksFoundationService not available - will use column name as semantic meaning")
+                    self.logger.warning("⚠️ AgenticFoundationService not available - will use column name as semantic meaning")
             except Exception as e:
-                self.logger.warning(f"⚠️ Failed to get LLM abstraction: {e} - will use column name as semantic meaning")
+                self.logger.warning(f"⚠️ Failed to get semantic meaning inference agent: {e} - will use column name as semantic meaning")
             
             self.logger.info("✅ Embedding Service initialized")
             return True

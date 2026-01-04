@@ -189,21 +189,196 @@ class RealmServiceBase(
             self.logger.info(f"🏗️ RealmServiceBase '{service_name}' initialized for realm '{realm_name}'")
     
     async def initialize(self) -> bool:
-        """Initialize the realm service."""
+        """
+        Initialize the realm service - lifecycle owned by City Manager.
+        
+        Services cannot initialize without City Manager permission.
+        City Manager must register the service for initialization before this method is called.
+        
+        RUNTIME CONFIG PATTERN ENFORCEMENT:
+        1. Lifecycle Ownership: City Manager controls when services initialize
+        2. Dependency Injection: Dependencies must be injected, not self-initialized
+        3. Transport/Storage Separation: Services must not blend transport and storage
+        """
         try:
             self.logger.info(f"🚀 Initializing {self.service_name}...")
             
+            # ========================================================================
+            # RUNTIME CONFIG PATTERN ENFORCEMENT (Phase 0.8 - Week 3)
+            # ========================================================================
+            
+            # 1. LIFECYCLE OWNERSHIP ENFORCEMENT
+            # ========================================================================
+            # Validate lifecycle ownership - City Manager controls service lifecycle
+            # Services cannot initialize themselves without City Manager permission
+            # ========================================================================
+            
+            # Get City Manager service
+            city_manager = None
+            try:
+                # Try to get City Manager from DI Container
+                if hasattr(self.di_container, 'get_foundation_service'):
+                    city_manager = self.di_container.get_foundation_service("CityManagerService")
+                elif hasattr(self.di_container, 'get_city_manager'):
+                    city_manager = self.di_container.get_city_manager()
+            except Exception as e:
+                self.logger.debug(f"City Manager not available via DI Container: {e}")
+            
+            # Check if City Manager is available
+            if not city_manager:
+                # Special case: City Manager itself doesn't need permission (bootstrap)
+                if self.service_name == "CityManagerService":
+                    self.logger.debug("City Manager initializing itself (bootstrap - no permission check needed)")
+                else:
+                    self.logger.error(
+                        f"❌ Service '{self.service_name}' cannot initialize without City Manager. "
+                        "City Manager controls service lifecycle."
+                    )
+                    raise RuntimeError(
+                        f"Service '{self.service_name}' cannot initialize without City Manager. "
+                        "City Manager controls service lifecycle."
+                    )
+            
+            # Check if service is allowed to initialize (City Manager controls this)
+            if city_manager and self.service_name != "CityManagerService":
+                service_management = city_manager.service_management_module
+                if not await service_management.can_service_initialize(self.service_name):
+                    error_msg = (
+                        f"Service '{self.service_name}' not allowed to initialize. "
+                        "City Manager controls service lifecycle. "
+                        "Service must be registered for initialization before calling initialize()."
+                    )
+                    self.logger.error(f"❌ {error_msg}")
+                    raise RuntimeError(error_msg)
+            
+            # 2. DEPENDENCY INJECTION ENFORCEMENT
+            # ========================================================================
+            # Validate that dependencies are injected (not self-initialized)
+            # Services must receive dependencies via constructor or DI Container
+            # ========================================================================
+            self._validate_dependency_injection()
+            
+            # 3. TRANSPORT/STORAGE SEPARATION ENFORCEMENT
+            # ========================================================================
+            # Validate that services don't blend transport and storage
+            # Transport services handle transport only, storage services handle storage only
+            # ========================================================================
+            self._validate_transport_storage_separation()
+            
+            # Proceed with initialization
             # Realm-specific initialization
             self.service_health = "healthy"
             self.is_initialized = True
             
+            # Notify City Manager that initialization is complete
+            if city_manager and self.service_name != "CityManagerService":
+                service_management = city_manager.service_management_module
+                await service_management.mark_service_initialized(self.service_name)
+            
             self.logger.info(f"✅ {self.service_name} Realm Service initialized successfully")
             return True
             
+        except RuntimeError:
+            # Re-raise lifecycle ownership errors
+            raise
         except Exception as e:
             self.logger.error(f"❌ Failed to initialize {self.service_name}: {e}")
             self.service_health = "unhealthy"
+            
+            # Notify City Manager of initialization failure
+            try:
+                city_manager = None
+                if hasattr(self.di_container, 'get_foundation_service'):
+                    city_manager = self.di_container.get_foundation_service("CityManagerService")
+                elif hasattr(self.di_container, 'get_city_manager'):
+                    city_manager = self.di_container.get_city_manager()
+                
+                if city_manager and self.service_name != "CityManagerService":
+                    service_management = city_manager.service_management_module
+                    await service_management.mark_service_error(self.service_name, str(e))
+            except Exception as notify_error:
+                self.logger.debug(f"Failed to notify City Manager of initialization error: {notify_error}")
+            
             return False
+    
+    def _validate_dependency_injection(self):
+        """
+        Validate that dependencies are injected (not self-initialized).
+        
+        RUNTIME CONFIG PATTERN: Services must receive dependencies via constructor or DI Container.
+        Services should NOT initialize dependencies internally.
+        """
+        # Check that required dependencies are present
+        if not hasattr(self, 'di_container') or not self.di_container:
+            raise RuntimeError(
+                f"Service '{self.service_name}' missing required dependency: di_container. "
+                "Dependencies must be injected via constructor."
+            )
+        
+        if not hasattr(self, 'platform_gateway') or not self.platform_gateway:
+            raise RuntimeError(
+                f"Service '{self.service_name}' missing required dependency: platform_gateway. "
+                "Dependencies must be injected via constructor."
+            )
+        
+        # Check for anti-pattern: services initializing dependencies in __init__
+        # This is a warning for now (can be made strict later)
+        # We can't easily detect this at runtime, but we can document the pattern
+        self.logger.debug(f"✅ Dependency injection validation passed for {self.service_name}")
+    
+    def _validate_transport_storage_separation(self):
+        """
+        Validate that services don't blend transport and storage.
+        
+        RUNTIME CONFIG PATTERN: Services must separate transport and storage concerns.
+        Transport services handle transport only, storage services handle storage only.
+        Smart City services are exempt (they're the infrastructure layer).
+        """
+        # Smart City services can blend (they're the infrastructure layer)
+        if self.realm_name == "smart_city":
+            return
+        
+        # Check if service has both transport and storage methods
+        transport_methods = [
+            m for m in dir(self) 
+            if ('transport' in m.lower() or 'send' in m.lower() or 'publish' in m.lower() or 'emit' in m.lower())
+            and not m.startswith('_')
+            and callable(getattr(self, m, None))
+        ]
+        
+        storage_methods = [
+            m for m in dir(self) 
+            if ('storage' in m.lower() or 'store' in m.lower() or 'save' in m.lower() or 'persist' in m.lower())
+            and not m.startswith('_')
+            and callable(getattr(self, m, None))
+        ]
+        
+        # If service has both transport and storage methods, it's blending
+        if len(transport_methods) > 0 and len(storage_methods) > 0:
+            # Check if service is explicitly a transport or storage service
+            service_name_lower = self.service_name.lower()
+            is_transport_service = 'transport' in service_name_lower or 'messaging' in service_name_lower or 'post_office' in service_name_lower
+            is_storage_service = 'storage' in service_name_lower or 'steward' in service_name_lower or 'database' in service_name_lower
+            
+            # If it's explicitly one or the other, allow it (might have helper methods)
+            if is_transport_service or is_storage_service:
+                self.logger.debug(f"✅ Service '{self.service_name}' is explicitly a transport/storage service - blending allowed")
+                return
+            
+            # Otherwise, warn about blending
+            self.logger.warning(
+                f"⚠️ Service '{self.service_name}' appears to blend transport and storage. "
+                f"Transport methods: {transport_methods[:3]}..., Storage methods: {storage_methods[:3]}... "
+                "Consider separating into transport and storage services."
+            )
+            # Note: This is a warning for now (can be made strict later)
+            # raise RuntimeError(
+            #     f"Service '{self.service_name}' blends transport and storage. "
+            #     "Use separate services: Transport service handles transport, "
+            #     "Storage service handles storage."
+            # )
+        
+        self.logger.debug(f"✅ Transport/storage separation validation passed for {self.service_name}")
     
     async def shutdown(self) -> bool:
         """Shutdown the realm service gracefully."""
@@ -364,8 +539,15 @@ class RealmServiceBase(
         return await self.get_smart_city_api("Librarian")
     
     async def get_content_steward_api(self) -> Optional[Any]:
-        """Convenience method to get Content Steward service."""
-        return await self.get_smart_city_api("ContentSteward")
+        """
+        Convenience method to get Content Steward service.
+        
+        DEPRECATED: Content Steward has been consolidated into Data Steward.
+        This method now returns Data Steward for backward compatibility.
+        New code should use get_data_steward_api() instead.
+        """
+        # Return Data Steward (Content Steward consolidated)
+        return await self.get_smart_city_api("DataSteward")
     
     async def get_data_steward_api(self) -> Optional[Any]:
         """Convenience method to get Data Steward service."""

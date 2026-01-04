@@ -276,6 +276,40 @@ async def curator_foundation(di_container):
         await foundation.shutdown()
 
 
+@pytest.fixture
+async def platform_gateway(di_container, public_works_foundation):
+    """
+    Platform Gateway Foundation Service fixture.
+    
+    Requires Public Works Foundation to be initialized first.
+    """
+    from foundations.platform_gateway_foundation.platform_gateway_foundation_service import (
+        PlatformGatewayFoundationService,
+    )
+    
+    # CRITICAL: Pass public_works_foundation to constructor
+    # PlatformGatewayFoundationService requires it for initialization
+    gateway = PlatformGatewayFoundationService(
+        di_container=di_container,
+        public_works_foundation=public_works_foundation
+    )
+    await gateway.initialize()
+    
+    # CRITICAL: Ensure Platform Gateway is accessible in DI container
+    # Realm services access it via di_container.get_foundation_service("PlatformGatewayFoundationService")
+    # or via platform_gateway attribute
+    if hasattr(di_container, 'register_foundation_service'):
+        di_container.register_foundation_service("PlatformGatewayFoundationService", gateway)
+    elif hasattr(di_container, 'platform_gateway'):
+        di_container.platform_gateway = gateway
+    
+    yield gateway
+    
+    # Cleanup
+    if hasattr(gateway, "shutdown"):
+        await gateway.shutdown()
+
+
 # ============================================================================
 # SMART CITY SERVICE FIXTURES
 # ============================================================================
@@ -337,6 +371,37 @@ async def traffic_cop_service(di_container, public_works_foundation):
     # Public Works Foundation must be initialized first (Traffic Cop needs session abstraction)
     service = TrafficCopService(di_container)
     await service.initialize()
+    
+    yield service
+    
+    # Cleanup
+    if hasattr(service, "shutdown"):
+        await service.shutdown()
+
+
+@pytest.fixture
+async def city_manager(di_container, public_works_foundation, platform_gateway):
+    """
+    City Manager Service fixture.
+    
+    CRITICAL: City Manager must be registered in DI Container so Realm services
+    can access it during initialization (lifecycle ownership check).
+    """
+    from backend.smart_city.services.city_manager.city_manager_service import CityManagerService
+    
+    # City Manager must be initialized with DI Container
+    service = CityManagerService(di_container=di_container)
+    await service.initialize()
+    
+    # CRITICAL: Register City Manager in DI Container so Realm services can find it
+    # Realm services check for City Manager via di_container.get_foundation_service("CityManagerService")
+    if hasattr(di_container, 'register_foundation_service'):
+        di_container.register_foundation_service("CityManagerService", service)
+    elif hasattr(di_container, 'city_manager'):
+        di_container.city_manager = service
+    # Also try get_service pattern
+    if hasattr(di_container, 'register_service'):
+        di_container.register_service("CityManagerService", service)
     
     yield service
     

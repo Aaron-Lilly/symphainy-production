@@ -799,15 +799,15 @@ class InsightsJourneyOrchestrator(OrchestratorBase):
             quality_issues = insights_query.get("quality_issues", False)
             
             # Step 1: Compose Client Data (via ContentSteward)
-            content_steward = await self.get_content_steward_api()
+            data_steward = await self.get_data_steward_api()
             client_data = []
-            if content_steward and file_ids:
+            if data_steward and file_ids:
                 try:
                     self.logger.info(f"📊 Composing client data for {len(file_ids)} files")
                     # Query file metadata for each file_id
                     for file_id in file_ids:
                         try:
-                            file_info = await content_steward.get_file(file_id, user_context=user_context)
+                            file_info = await data_steward.get_file(file_id, user_context=user_context)
                             if file_info:
                                 results["file_ids"].append(file_id)
                                 
@@ -1472,8 +1472,8 @@ class InsightsJourneyOrchestrator(OrchestratorBase):
             self.logger.info(f"🔍 Starting holistic data quality evaluation: file_id={file_id}, parsed_file_id={parsed_file_id}")
             
             # Get Content Steward to retrieve parsed file
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "Content Steward service not available"
@@ -1482,12 +1482,12 @@ class InsightsJourneyOrchestrator(OrchestratorBase):
             # Step 1: Retrieve parsed file and validation rules
             if not parsed_file_id:
                 # Get parsed_file_id from file metadata
-                file_info = await content_steward.get_file(file_id, user_context=user_context)
+                file_info = await data_steward.get_file(file_id, user_context=user_context)
                 if file_info and file_info.get("metadata"):
                     parsed_file_id = file_info.get("metadata", {}).get("parsed_file_id")
                     if not parsed_file_id:
                         # Try to get first parsed file for this file_id
-                        parsed_files = await content_steward.list_parsed_files(file_id=file_id, user_context=user_context)
+                        parsed_files = await data_steward.list_parsed_files(file_id=file_id, user_context=user_context)
                         if parsed_files and isinstance(parsed_files, list) and len(parsed_files) > 0:
                             parsed_file_id = parsed_files[0].get("parsed_file_id")
             
@@ -1498,7 +1498,7 @@ class InsightsJourneyOrchestrator(OrchestratorBase):
                 }
             
             # Get parsed file data
-            parsed_file_result = await content_steward.get_parsed_file(parsed_file_id, user_context=user_context)
+            parsed_file_result = await data_steward.get_parsed_file(parsed_file_id, user_context=user_context)
             if not parsed_file_result:
                 return {
                     "success": False,
@@ -1952,13 +1952,13 @@ class InsightsJourneyOrchestrator(OrchestratorBase):
                     self.logger.warning(f"⚠️ Failed to query content from Librarian: {e}")
             
             # Try to get ContentSteward to query for file-based analyses
-            content_steward = await self.get_content_steward_api()
-            if content_steward:
+            data_steward = await self.get_data_steward_api()
+            if data_steward:
                 try:
                     # Query for files with analysis results
                     # This is a placeholder - actual implementation depends on ContentSteward API
                     if hasattr(content_steward, 'list_files_with_analyses'):
-                        files_result = await content_steward.list_files_with_analyses(
+                        files_result = await data_steward.list_files_with_analyses(
                             session_id=session_id,
                             user_context=user_context
                         )

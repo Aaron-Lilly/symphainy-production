@@ -244,6 +244,19 @@ class FileLifecycle:
                 self.logger.debug(f"File not found: {file_id}")
                 return None
             
+            # Additional tenant validation after retrieval (defense in depth)
+            if user_context:
+                tenant_id = user_context.get("tenant_id")
+                if tenant_id and file_record.get("tenant_id"):
+                    if file_record.get("tenant_id") != tenant_id:
+                        self.logger.warning(f"⚠️ Tenant isolation violation: User tenant {tenant_id} tried to access file from tenant {file_record.get('tenant_id')}")
+                        await self.service.record_health_metric("file_lifecycle_get_tenant_denied", 1.0, {
+                            "file_id": file_id,
+                            "user_tenant_id": tenant_id,
+                            "file_tenant_id": file_record.get("tenant_id")
+                        })
+                        raise PermissionError("Tenant isolation violation: Cannot access file from different tenant")
+            
             return file_record
             
         except Exception as e:

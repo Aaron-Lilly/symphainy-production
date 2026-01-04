@@ -204,18 +204,18 @@ class DataMappingWorkflow:
         """
         try:
             # Get Content Steward to retrieve file metadata
-            content_steward = await self.orchestrator.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.orchestrator.get_data_steward_api()
+            if not data_steward:
                 # Fallback: assume structured if can't determine
                 self.logger.warning("⚠️ Content Steward not available, defaulting to structured→structured")
                 return "structured_to_structured"
             
             # Get source file metadata
-            source_file = await content_steward.get_file(source_file_id)
+            source_file = await data_steward.get_file(source_file_id)
             source_file_type = source_file.get("file_type", "").lower() if source_file else ""
             
             # Get target file metadata
-            target_file = await content_steward.get_file(target_file_id)
+            target_file = await data_steward.get_file(target_file_id)
             target_file_type = target_file.get("file_type", "").lower() if target_file else ""
             
             # Determine mapping type
@@ -296,12 +296,12 @@ class DataMappingWorkflow:
         """Get embeddings for source file (for semantic matching)."""
         try:
             # Get Content Steward to find content metadata
-            content_steward = await self.orchestrator.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.orchestrator.get_data_steward_api()
+            if not data_steward:
                 return []
             
             # Get parsed file to find content_metadata_id
-            parsed_file = await content_steward.get_parsed_file(source_file_id)
+            parsed_file = await data_steward.get_parsed_file(source_file_id)
             if not parsed_file:
                 return []
             
@@ -328,12 +328,12 @@ class DataMappingWorkflow:
         """Get embeddings for target file (for semantic matching)."""
         try:
             # Get Content Steward to find content metadata
-            content_steward = await self.orchestrator.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.orchestrator.get_data_steward_api()
+            if not data_steward:
                 return []
             
             # Get parsed file to find content_metadata_id
-            parsed_file = await content_steward.get_parsed_file(target_file_id)
+            parsed_file = await data_steward.get_parsed_file(target_file_id)
             if not parsed_file:
                 return []
             
@@ -442,15 +442,15 @@ class DataMappingWorkflow:
         """Get structured source data."""
         try:
             # Get Content Steward to retrieve parsed file
-            content_steward = await self.orchestrator.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.orchestrator.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "Content Steward not available"
                 }
             
             # Get parsed file data
-            parsed_file = await content_steward.get_parsed_file(source_file_id)
+            parsed_file = await data_steward.get_parsed_file(source_file_id)
             if not parsed_file:
                 return {
                     "success": False,

@@ -57,7 +57,7 @@ class EmbeddingCreation:
                 return None
             
             # Get parsed file (SECURE BOUNDARY - ONLY place this happens)
-            parsed_file = await self.service.content_steward.get_file(
+            parsed_file = await self.service.data_steward.get_file(
                 parsed_file_id,
                 user_context
             )

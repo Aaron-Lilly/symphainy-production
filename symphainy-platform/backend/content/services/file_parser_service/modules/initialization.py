@@ -33,15 +33,15 @@ class Initialization:
             # 1. Discover Smart City services (via Curator)
             # Business Enablement uses Smart City SOA APIs, not direct infrastructure access
             self.service.librarian = await self.service.get_librarian_api()
-            self.service.content_steward = await self.service.get_content_steward_api()
+            # Note: Content Steward consolidated into Data Steward
             self.service.data_steward = await self.service.get_data_steward_api()
             self.service.nurse = await self.service.get_nurse_api()  # ✅ Added for observability
             
             # Log discovery results for debugging
-            if not self.service.content_steward:
-                self.service.logger.warning("⚠️ Content Steward API not discovered via Curator - file retrieval may fail")
+            if not self.service.data_steward:
+                self.service.logger.warning("⚠️ Data Steward API not discovered via Curator - file retrieval may fail")
             else:
-                self.service.logger.info(f"✅ Content Steward API discovered: {type(self.service.content_steward).__name__}")
+                self.service.logger.info(f"✅ Data Steward API discovered: {type(self.service.data_steward).__name__}")
             
             # 2. Verify file parsing abstractions are available via Platform Gateway
             # File parsing now uses individual file type abstractions (excel_processing, pdf_processing, etc.)
@@ -63,93 +63,108 @@ class Initialization:
             # 3. Register with Curator (Phase 2 pattern with CapabilityDefinition structure)
             # Note: Enabling services provide SOA APIs only (no MCP tools)
             # MCP servers are at the orchestrator level for use case-level tools
-            await self.service.register_with_curator(
-                capabilities=[
-                    {
-                        "name": "file_parsing",
-                        "protocol": "FileParserServiceProtocol",
-                        "description": "Parse files into structured formats",
-                        "contracts": {
-                            "soa_api": {
-                                "api_name": "parse_file",
-                                "endpoint": "/api/v1/file-parser/parse",
-                                "method": "POST",
-                                "handler": self.service.parse_file,
-                                "metadata": {
-                                    "description": "Parse file into structured format",
-                                    "parameters": ["file_id", "parse_options"]
-                                }
+            capabilities_list = [
+                {
+                    "name": "file_parsing",
+                    "protocol": "FileParserServiceProtocol",
+                    "description": "Parse files into structured formats",
+                    "contracts": {
+                        "soa_api": {
+                            "api_name": "parse_file",
+                            "endpoint": "/api/v1/file-parser/parse",
+                            "method": "POST",
+                            "handler": self.service.parse_file,
+                            "metadata": {
+                                "description": "Parse file into structured format",
+                                "parameters": ["file_id", "parse_options"]
                             }
-                        },
-                        "semantic_mapping": {
-                            "domain_capability": "content.parse_file",
-                            "semantic_api": "/api/v1/content-pillar/parse-file"
                         }
                     },
-                    {
-                        "name": "format_detection",
-                        "protocol": "FileParserServiceProtocol",
-                        "description": "Detect file type and format",
-                        "contracts": {
-                            "soa_api": {
-                                "api_name": "detect_file_type",
-                                "endpoint": "/api/v1/file-parser/detect-type",
-                                "method": "POST",
-                                "handler": self.service.detect_file_type,
-                                "metadata": {
-                                    "description": "Detect file type",
-                                    "parameters": ["file_id"]
-                                }
-                            }
-                        },
-                        "semantic_mapping": {
-                            "domain_capability": "content.detect_file_type",
-                            "semantic_api": "/api/v1/content-pillar/detect-file-type"
-                        }
-                    },
-                    {
-                        "name": "content_extraction",
-                        "protocol": "FileParserServiceProtocol",
-                        "description": "Extract plain text content from files",
-                        "contracts": {
-                            "soa_api": {
-                                "api_name": "extract_content",
-                                "endpoint": "/api/v1/file-parser/extract-content",
-                                "method": "POST",
-                                "handler": self.service.extract_content,
-                                "metadata": {
-                                    "description": "Extract plain text content",
-                                    "parameters": ["file_id"]
-                                }
-                            }
-                        },
-                        "semantic_mapping": {
-                            "domain_capability": "content.extract_content",
-                            "semantic_api": "/api/v1/content-pillar/extract-content"
-                        }
-                    },
-                    {
-                        "name": "metadata_extraction",
-                        "protocol": "FileParserServiceProtocol",
-                        "description": "Extract metadata from files",
-                        "contracts": {
-                            "soa_api": {
-                                "api_name": "extract_metadata",
-                                "endpoint": "/api/v1/file-parser/extract-metadata",
-                                "method": "POST",
-                                "handler": self.service.extract_metadata,
-                                "metadata": {
-                                    "description": "Extract file metadata",
-                                    "parameters": ["file_id"]
-                                }
-                            }
-                        },
-                        "semantic_mapping": {
-                            "domain_capability": "content.extract_metadata",
-                            "semantic_api": "/api/v1/content-pillar/extract-metadata"
-                        }
+                    "semantic_mapping": {
+                        "domain_capability": "content.parse_file",
+                        "semantic_api": "/api/v1/content-pillar/parse-file"
                     }
-                ]
+                },
+                {
+                    "name": "format_detection",
+                    "protocol": "FileParserServiceProtocol",
+                    "description": "Detect file type and format",
+                    "contracts": {
+                        "soa_api": {
+                            "api_name": "detect_file_type",
+                            "endpoint": "/api/v1/file-parser/detect-type",
+                            "method": "POST",
+                            "handler": self.service.detect_file_type,
+                            "metadata": {
+                                "description": "Detect file type",
+                                "parameters": ["file_id"]
+                            }
+                        }
+                    },
+                    "semantic_mapping": {
+                        "domain_capability": "content.detect_file_type",
+                        "semantic_api": "/api/v1/content-pillar/detect-file-type"
+                    }
+                },
+                {
+                    "name": "content_extraction",
+                    "protocol": "FileParserServiceProtocol",
+                    "description": "Extract plain text content from files",
+                    "contracts": {
+                        "soa_api": {
+                            "api_name": "extract_content",
+                            "endpoint": "/api/v1/file-parser/extract-content",
+                            "method": "POST",
+                            "handler": self.service.extract_content,
+                            "metadata": {
+                                "description": "Extract plain text content",
+                                "parameters": ["file_id"]
+                            }
+                        }
+                    },
+                    "semantic_mapping": {
+                        "domain_capability": "content.extract_content",
+                        "semantic_api": "/api/v1/content-pillar/extract-content"
+                    }
+                },
+                {
+                    "name": "metadata_extraction",
+                    "protocol": "FileParserServiceProtocol",
+                    "description": "Extract metadata from files",
+                    "contracts": {
+                        "soa_api": {
+                            "api_name": "extract_metadata",
+                            "endpoint": "/api/v1/file-parser/extract-metadata",
+                            "method": "POST",
+                            "handler": self.service.extract_metadata,
+                            "metadata": {
+                                "description": "Extract file metadata",
+                                "parameters": ["file_id"]
+                            }
+                        }
+                    },
+                    "semantic_mapping": {
+                        "domain_capability": "content.extract_metadata",
+                        "semantic_api": "/api/v1/content-pillar/extract-metadata"
+                    }
+                }
+            ]
+            
+            # Extract SOA API names from capabilities
+            soa_api_names = []
+            for capability in capabilities_list:
+                if "contracts" in capability and "soa_api" in capability["contracts"]:
+                    api_name = capability["contracts"]["soa_api"].get("api_name")
+                    if api_name:
+                        soa_api_names.append(api_name)
+            
+            # Enabling services don't have MCP tools (orchestrators do)
+            mcp_tool_names = []
+            
+            await self.service.register_with_curator(
+                capabilities=capabilities_list,
+                soa_apis=soa_api_names,
+                mcp_tools=mcp_tool_names
             )
             
             self.service.logger.info("✅ File Parser Service registered with Curator")

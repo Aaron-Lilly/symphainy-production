@@ -60,8 +60,7 @@ class ContentManagerService(ManagerServiceBase, ManagerServiceProtocol):
         
         # Smart City Services (discovered via Curator for business-level operations)
         self.librarian = None  # Content metadata management
-        self.content_steward = None  # Content operations
-        self.data_steward = None  # Data operations
+        self.data_steward = None  # Data operations (Content Steward consolidated)
         
         # Service State
         self.is_infrastructure_connected = False

@@ -62,8 +62,12 @@ class RedisSessionAdapter(SessionProtocol):
                            session_data: Dict[str, Any]) -> Session:
         """Create a new session in Redis."""
         try:
-            session_id = str(uuid.uuid4())
+            # Use session_id from session_data if provided, otherwise generate new one
+            session_id = session_data.get("session_id") or str(uuid.uuid4())
             now = datetime.utcnow()
+            
+            # Get TTL from session_data or use default
+            ttl_seconds = session_data.get("ttl_seconds", self.session_ttl)
             
             # Create session object
             session = Session(
@@ -73,14 +77,14 @@ class RedisSessionAdapter(SessionProtocol):
                 session_type=SessionType(session_data.get("session_type", "user")),
                 status=SessionStatus.ACTIVE,
                 created_at=now,
-                expires_at=now + timedelta(seconds=self.session_ttl),
+                expires_at=now + timedelta(seconds=ttl_seconds),
                 last_accessed=now,
                 security_level=SecurityLevel(session_data.get("security_level", "medium")),
                 metadata=session_data.get("metadata", {}),
                 tags=session_data.get("tags", [])
             )
             
-            # Store in Redis (simulated)
+            # Store in Redis
             await self._store_session(session)
             
             # Initialize analytics
@@ -414,31 +418,45 @@ class RedisSessionAdapter(SessionProtocol):
         """Store session in Redis using real Redis adapter."""
         session_data = {
             "session_id": session.session_id,
-            "user_id": session.user_id,
-            "agent_id": session.agent_id,
+            "user_id": session.user_id or "",
+            "agent_id": session.agent_id or "",
             "session_type": session.session_type.value,
             "status": session.status.value,
             "created_at": session.created_at.isoformat(),
-            "expires_at": session.expires_at.isoformat() if session.expires_at else None,
+            "expires_at": session.expires_at.isoformat() if session.expires_at else "",
             "last_accessed": session.last_accessed.isoformat(),
             "security_level": session.security_level.value,
-            "metadata": json.dumps(session.metadata),
-            "tags": json.dumps(session.tags)
+            "metadata": json.dumps(session.metadata) if session.metadata else "{}",
+            "tags": json.dumps(session.tags) if session.tags else "[]"
         }
+        
+        # Filter out None values and convert to strings (Redis requires strings)
+        session_data = {k: str(v) if v is not None else "" for k, v in session_data.items()}
         
         # Store session as hash in Redis
         session_key = f"session:{session.session_id}"
-        await self.redis_adapter.hset(session_key, mapping=session_data)
+        result = await self.redis_adapter.hset(session_key, mapping=session_data)
+        if result:
+            self.logger.debug(f"✅ Stored session in Redis: {session_key}")
+        else:
+            self.logger.error(f"❌ Failed to store session in Redis: {session_key}")
         
         # Set TTL
         if session.expires_at:
             ttl = int((session.expires_at - datetime.utcnow()).total_seconds())
             await self.redis_adapter.expire(session_key, ttl)
+            self.logger.debug(f"✅ Set TTL for session {session_key}: {ttl} seconds")
+        else:
+            # Default TTL if no expiration
+            await self.redis_adapter.expire(session_key, self.session_ttl)
+            self.logger.debug(f"✅ Set default TTL for session {session_key}: {self.session_ttl} seconds")
         
         # Track user sessions
         user_key = f"user_sessions:{session.user_id}"
         await self.redis_adapter.sadd(user_key, session.session_id)
-        await self.redis_adapter.expire(user_key, ttl)
+        if session.expires_at:
+            ttl = int((session.expires_at - datetime.utcnow()).total_seconds())
+            await self.redis_adapter.expire(user_key, ttl)
     
     async def _get_session_data(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session data from Redis using real Redis adapter."""
@@ -447,6 +465,15 @@ class RedisSessionAdapter(SessionProtocol):
         session_data = await self.redis_adapter.hgetall(session_key)
         
         if not session_data:
+            self.logger.debug(f"⚠️ Session not found in Redis: {session_key}")
+            # Debug: Check if any session keys exist
+            try:
+                all_keys = await self.redis_adapter.keys("session:*")
+                self.logger.debug(f"🔍 Found {len(all_keys)} session keys in Redis")
+                if all_keys:
+                    self.logger.debug(f"🔍 Sample keys: {all_keys[:5]}")
+            except Exception as e:
+                self.logger.debug(f"⚠️ Could not list session keys: {e}")
             return None
         
         # Parse metadata and tags

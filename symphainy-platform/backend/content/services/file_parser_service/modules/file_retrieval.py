@@ -18,10 +18,11 @@ class FileRetrieval:
     
     async def retrieve_document(self, file_id: str) -> Optional[Dict[str, Any]]:
         """
-        Retrieve file via Content Steward SOA API (Smart City service).
+        Retrieve file via Data Steward SOA API (Smart City service).
         
         Business Enablement services should use Smart City APIs, not direct infrastructure access.
-        Content Steward wraps Public Works file_management and exposes it as an SOA API.
+        Data Steward wraps Public Works file_management and exposes it as an SOA API.
+        Note: Content Steward consolidated into Data Steward.
         
         Args:
             file_id: ID of file to retrieve
@@ -30,29 +31,29 @@ class FileRetrieval:
             File data with metadata, or None if not found
         """
         try:
-            # Tier 1: Try SOA API (Content Steward)
+            # Tier 1: Try SOA API (Data Steward - Content Steward consolidated)
             self.service.logger.info(f"🔍 FileParserService.retrieve_document({file_id})")
             
-            if not self.service.content_steward:
-                self.service.logger.warning(f"⚠️ Content Steward API not available (self.content_steward is None), trying Platform Gateway")
+            if not self.service.data_steward:
+                self.service.logger.warning(f"⚠️ Data Steward API not available (self.data_steward is None), trying Platform Gateway")
             else:
                 try:
-                    self.service.logger.info(f"   Calling content_steward.get_file({file_id})")
-                    file_record = await self.service.content_steward.get_file(file_id)
+                    self.service.logger.info(f"   Calling data_steward.get_file({file_id})")
+                    file_record = await self.service.data_steward.get_file(file_id)
                     if file_record:
-                        # Content Steward returns file with file_content, not data
+                        # Data Steward returns file with file_content, not data
                         # Check if it's a valid file record (has uuid or file_content)
                         if file_record.get("uuid") or file_record.get("file_content") is not None:
-                            self.service.logger.info(f"✅ File retrieved via Content Steward: {file_id}")
+                            self.service.logger.info(f"✅ File retrieved via Data Steward: {file_id}")
                             return file_record
                         else:
-                            self.service.logger.warning(f"⚠️ Content Steward returned empty record: {file_id}, trying Platform Gateway")
+                            self.service.logger.warning(f"⚠️ Data Steward returned empty record: {file_id}, trying Platform Gateway")
                     else:
-                        self.service.logger.warning(f"⚠️ File not found via Content Steward (returned None): {file_id}, trying Platform Gateway")
+                        self.service.logger.warning(f"⚠️ File not found via Data Steward (returned None): {file_id}, trying Platform Gateway")
                 except Exception as e:
-                    self.service.logger.warning(f"⚠️ Content Steward failed: {e}, trying Platform Gateway")
+                    self.service.logger.warning(f"⚠️ Data Steward failed: {e}, trying Platform Gateway")
                     import traceback
-                    self.service.logger.debug(f"   Content Steward error traceback: {traceback.format_exc()}")
+                    self.service.logger.debug(f"   Data Steward error traceback: {traceback.format_exc()}")
             
             # Tier 2: Fallback to Platform Gateway (file_management abstraction)
             try:
@@ -67,12 +68,12 @@ class FileRetrieval:
                 self.service.logger.warning(f"⚠️ Platform Gateway failed: {e}")
             
             # Tier 3: Fail gracefully with structured error
-            self.service.logger.error(f"❌ Failed to retrieve file {file_id} - tried Content Steward and Platform Gateway")
+            self.service.logger.error(f"❌ Failed to retrieve file {file_id} - tried Data Steward and Platform Gateway")
             return {
                 "success": False,
                 "error": "File retrieval failed",
                 "error_code": "FILE_NOT_FOUND",
-                "message": f"Could not retrieve file {file_id}. Tried Content Steward SOA API and Platform Gateway - both unavailable or file not found.",
+                "message": f"Could not retrieve file {file_id}. Tried Data Steward SOA API and Platform Gateway - both unavailable or file not found.",
                 "file_id": file_id
             }
             

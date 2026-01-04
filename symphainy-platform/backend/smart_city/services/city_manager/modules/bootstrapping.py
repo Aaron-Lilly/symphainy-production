@@ -112,6 +112,9 @@ class Bootstrapping:
                 # Note: get_foundation_service() reads from service_registry, so we store directly
                 self.service.di_container.service_registry["SolutionManagerService"] = solution_manager
             
+            # Register Solution Manager for initialization (City Manager controls lifecycle)
+            await self.service.service_management_module.register_service_for_initialization("SolutionManagerService")
+            
             # Initialize Solution Manager
             # Check if already initialized (attribute may not exist, so check safely)
             if not hasattr(solution_manager, 'is_initialized') or not solution_manager.is_initialized:
@@ -182,6 +185,9 @@ class Bootstrapping:
                 
                 # Register in DI Container service_registry
                 self.service.di_container.service_registry["JourneyManagerService"] = journey_manager
+            
+            # Register Journey Manager for initialization (City Manager controls lifecycle)
+            await self.service.service_management_module.register_service_for_initialization("JourneyManagerService")
             
             # Initialize Journey Manager
             if not hasattr(journey_manager, 'is_initialized') or not journey_manager.is_initialized:
@@ -260,6 +266,9 @@ class Bootstrapping:
                 
                 # Register in DI Container service_registry
                 self.service.di_container.service_registry["DeliveryManagerService"] = delivery_manager
+            
+            # Register Delivery Manager for initialization (City Manager controls lifecycle)
+            await self.service.service_management_module.register_service_for_initialization("DeliveryManagerService")
             
             # Initialize Delivery Manager
             if not hasattr(delivery_manager, 'is_initialized') or not delivery_manager.is_initialized:

@@ -55,7 +55,7 @@ class DataTransformationService(RealmServiceBase):
         super().__init__(service_name, realm_name, platform_gateway, di_container)
         
         # Smart City service APIs (will be initialized in initialize())
-        self.content_steward = None
+        self.data_steward = None
         self.file_management = None
         self.nurse = None
     
@@ -67,7 +67,7 @@ class DataTransformationService(RealmServiceBase):
             self.logger.info("🚀 Initializing Data Transformation Service...")
             
             # Get Smart City services
-            self.content_steward = await self.get_smart_city_service("ContentStewardService")
+            self.data_steward = await self.get_smart_city_service("DataStewardService")
             self.file_management = await self.get_infrastructure_abstraction("file_management")
             self.nurse = await self.get_smart_city_service("NurseService")
             

@@ -268,11 +268,11 @@ class PlatformOrchestrator:
         self.logger.info("🚀 Starting SymphAIny Platform Orchestration (Lazy-Hydrating Service Mesh)")
         
         try:
-            # ✅ Phase 0.5: Generate platform startup workflow_id for correlation tracking
+            # ✅ Phase 0.5: Generate platform startup correlation_id for correlation tracking
             import uuid
-            platform_startup_workflow_id = str(uuid.uuid4())
-            app_state["platform_startup_workflow_id"] = platform_startup_workflow_id
-            self.logger.info(f"📊 Platform startup workflow_id: {platform_startup_workflow_id}")
+            platform_startup_correlation_id = str(uuid.uuid4())
+            app_state["platform_startup_correlation_id"] = platform_startup_correlation_id
+            self.logger.info(f"📊 Platform startup correlation_id: {platform_startup_correlation_id}")
             
             # Phase 1: Bootstrap Foundation (EAGER)
             await self._initialize_foundation_infrastructure()
@@ -280,9 +280,10 @@ class PlatformOrchestrator:
             # Phase 2: Register Smart City Gateway (EAGER)
             await self._initialize_smart_city_gateway()
             
-            # Phase 2.5: Initialize MVP Solution (EAGER - required for MVP)
-            # This bootstraps the manager hierarchy (Solution → Journey → Delivery)
-            # and ensures Delivery Manager is available before Frontend Gateway Service
+            # Phase 2.5: Bootstrap Manager Hierarchy (EAGER)
+            # This bootstraps the manager hierarchy (Solution Manager → Journey, Insights, Content Managers as peers)
+            # Per Phase 0.4: Solution Manager bootstraps ALL realm managers (Journey, Insights, Content) as peers
+            # Note: Delivery Manager to be archived (or kept for very narrow purpose if enabling services exist)
             await self._initialize_mvp_solution()
             
             # Phase 3: Lazy Realm Hydration (deferred - no eager initialization)
@@ -304,8 +305,7 @@ class PlatformOrchestrator:
             self.logger.info("🎉 Platform orchestration completed successfully!")
             self.logger.info("   ✅ Foundations initialized (EAGER)")
             self.logger.info("   ✅ Smart City Gateway active (EAGER)")
-            self.logger.info("   ✅ MVP Solution initialized (EAGER - required for MVP)")
-            self.logger.info("   ✅ Manager hierarchy bootstrapped (Solution → Journey → Delivery)")
+            self.logger.info("   ✅ Manager hierarchy bootstrapped (Solution → Journey, Insights, Content as peers)")
             self.logger.info("   ✅ Lazy hydration ready (services load on-demand)")
             self.logger.info("   ✅ Background watchers started")
             self.logger.info("   ✅ Curator auto-discovery active")
@@ -538,18 +538,20 @@ class PlatformOrchestrator:
     
     async def _initialize_mvp_solution(self):
         """
-        Initialize MVP Solution (EAGER - required for MVP).
+        Bootstrap Manager Hierarchy (EAGER).
         
-        This bootstraps the manager hierarchy (Solution → Journey → Delivery)
-        and ensures Delivery Manager is available before Frontend Gateway Service.
+        Per Phase 0.4 Architecture Contract:
+        - City Manager bootstraps Solution Manager
+        - Solution Manager bootstraps ALL realm managers (Journey, Insights, Content) as peers
+        - All realm managers are peers under Solution Manager
+        - Delivery Manager to be archived (or kept for very narrow purpose if enabling services exist)
         
         Flow:
-        1. Bootstrap manager hierarchy (Solution Manager → Journey Manager → Delivery Manager)
-        2. Create MVP Solution (provides context for MVP use case)
-        3. MVP Journey is initiated (Journey Manager orchestrates MVP Journey)
-        4. Delivery Manager initializes MVP pillar orchestrators
+        1. Bootstrap manager hierarchy (Solution Manager → Journey, Insights, Content Managers as peers)
+        2. Create MVP Solution (provides context for MVP use case) - optional for MVP
+        3. Verify all realm managers are available
         """
-        self.logger.info("🎯 Phase 2.5: Initializing MVP Solution")
+        self.logger.info("🎯 Phase 2.5: Bootstrapping Manager Hierarchy")
         
         try:
             # Get City Manager (should be initialized in Phase 2)
@@ -558,8 +560,8 @@ class PlatformOrchestrator:
                 self.logger.error("❌ City Manager not available - cannot bootstrap MVP Solution")
                 raise RuntimeError("City Manager must be initialized before MVP Solution")
             
-            # Step 1: Bootstrap manager hierarchy (Solution → Journey → Delivery)
-            self.logger.info("   Step 1: Bootstrapping manager hierarchy...")
+            # Step 1: Bootstrap manager hierarchy (Solution Manager → Journey, Insights, Content Managers as peers)
+            self.logger.info("   Step 1: Bootstrapping manager hierarchy (Solution → Journey, Insights, Content as peers)...")
             bootstrap_result = await city_manager.bootstrap_manager_hierarchy({
                 "solution_type": "mvp",
                 "auto_bootstrap": True
@@ -575,55 +577,43 @@ class PlatformOrchestrator:
             self.logger.info(f"      - Bootstrapped managers: {', '.join(bootstrap_result.bootstrapped_managers)}")
             self.logger.info(f"      - Hierarchy status: {bootstrap_result.hierarchy_status}")
             
-            # Step 2: Create MVP Solution (provides context for MVP use case)
-            self.logger.info("   Step 2: Creating MVP Solution...")
-            # Get Solution Manager from manager_hierarchy
+            # Step 2: Verify all realm managers are available
+            self.logger.info("   Step 2: Verifying realm managers...")
             solution_manager_info = city_manager.manager_hierarchy.get("solution_manager")
+            journey_manager_info = city_manager.manager_hierarchy.get("journey_manager")
+            insights_manager_info = city_manager.manager_hierarchy.get("insights_manager")
+            content_manager_info = city_manager.manager_hierarchy.get("content_manager")
+            
             if not solution_manager_info or "instance" not in solution_manager_info:
                 self.logger.error("❌ Solution Manager not available after bootstrap")
                 raise RuntimeError("Solution Manager not available after bootstrap")
-            solution_manager = solution_manager_info["instance"]
+            self.logger.info("   ✅ Solution Manager available")
             
-            # Design MVP Solution
-            mvp_solution_result = await solution_manager.design_solution({
-                "solution_type": "mvp",
-                "requirements": {
-                    "journey_type": "mvp",
-                    "pillars": ["content", "insights", "operations", "business_outcomes"],
-                    "navigation_mode": "free"  # Allow free navigation between pillars
-                }
-            })
-            
-            if not mvp_solution_result.get("success"):
-                error_msg = mvp_solution_result.get("error", "Unknown error")
-                self.logger.error(f"❌ MVP Solution design failed: {error_msg}")
-                raise RuntimeError(f"MVP Solution design failed: {error_msg}")
-            
-            mvp_solution = mvp_solution_result.get("solution_design", {})
-            self.logger.info(f"   ✅ MVP Solution created: {mvp_solution.get('solution_id', 'unknown')}")
-            
-            # Step 3: Verify Delivery Manager is available (should be bootstrapped)
-            delivery_manager_info = city_manager.manager_hierarchy.get("delivery_manager")
-            if not delivery_manager_info or "instance" not in delivery_manager_info:
-                self.logger.error("❌ Delivery Manager not available after bootstrap")
-                raise RuntimeError("Delivery Manager not available after bootstrap")
-            delivery_manager = delivery_manager_info["instance"]
-            
-            # Verify orchestrators are initialized
-            if hasattr(delivery_manager, 'mvp_pillar_orchestrators'):
-                orchestrator_count = len(delivery_manager.mvp_pillar_orchestrators)
-                self.logger.info(f"   ✅ Delivery Manager has {orchestrator_count} MVP pillar orchestrators initialized")
+            if not journey_manager_info or "instance" not in journey_manager_info:
+                self.logger.warning("   ⚠️ Journey Manager not available after bootstrap (may need to be created)")
             else:
-                self.logger.warning("   ⚠️ Delivery Manager does not have mvp_pillar_orchestrators attribute")
+                self.logger.info("   ✅ Journey Manager available")
             
-            # Store MVP Solution in platform orchestrator state
-            self.managers["mvp_solution"] = mvp_solution
-            self.startup_status["mvp_solution"] = "completed"
-            self.startup_sequence.append("mvp_solution")
-            self.logger.info("✅ MVP Solution initialized successfully")
-            self.logger.info("   ✅ Manager hierarchy bootstrapped (Solution → Journey → Delivery)")
-            self.logger.info("   ✅ MVP Solution created and active")
-            self.logger.info("   ✅ Delivery Manager available with orchestrators")
+            if not insights_manager_info or "instance" not in insights_manager_info:
+                self.logger.warning("   ⚠️ Insights Manager not available after bootstrap (REQUIRED - needs to be created per Phase 0.4)")
+            else:
+                self.logger.info("   ✅ Insights Manager available")
+            
+            if not content_manager_info or "instance" not in content_manager_info:
+                self.logger.warning("   ⚠️ Content Manager not available after bootstrap (REQUIRED - needs to be created per Phase 0.4)")
+            else:
+                self.logger.info("   ✅ Content Manager available")
+            
+            # Step 3: Optional - Create MVP Solution (provides context for MVP use case)
+            # This is optional and can be done lazily when needed
+            self.logger.info("   Step 3: MVP Solution will be created on-demand (lazy)")
+            
+            self.startup_status["manager_hierarchy"] = "completed"
+            self.startup_sequence.append("manager_hierarchy")
+            self.logger.info("✅ Manager hierarchy bootstrapped successfully")
+            self.logger.info("   ✅ Solution Manager bootstrapped")
+            self.logger.info("   ✅ Realm managers bootstrapped (Journey, Insights, Content as peers)")
+            self.logger.info("   ⚠️ Note: Insights Manager and Content Manager need to be created (per Phase 0.4)")
             
         except Exception as e:
             self.logger.error(f"❌ MVP Solution initialization failed: {e}")

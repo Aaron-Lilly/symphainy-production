@@ -221,12 +221,12 @@ class UnstructuredAnalysisWorkflow:
             
             if source_type == "file":
                 # Get file via Content Steward (lazy load if needed)
-                content_steward = await self.orchestrator.get_content_steward_api()
-                if not content_steward:
+                data_steward = await self.orchestrator.get_data_steward_api()
+                if not data_steward:
                     return {"success": False, "error": "Content Steward service not available"}
                 
                 # Use Content Steward SOA API to get file
-                file_record = await content_steward.get_file(file_id)
+                file_record = await data_steward.get_file(file_id)
                 if not file_record:
                     return {"success": False, "error": f"File {file_id} not found"}
                 
@@ -254,12 +254,12 @@ class UnstructuredAnalysisWorkflow:
                 
             elif source_type == "content_metadata":
                 # Get content metadata via Content Steward (lazy load if needed)
-                content_steward = await self.orchestrator.get_content_steward_api()
-                if not content_steward:
+                data_steward = await self.orchestrator.get_data_steward_api()
+                if not data_steward:
                     return {"success": False, "error": "Content Steward service not available"}
                 
                 # Use Content Steward SOA API to get asset metadata (includes content metadata from ArangoDB)
-                asset_metadata = await content_steward.get_asset_metadata(content_metadata_id)
+                asset_metadata = await data_steward.get_asset_metadata(content_metadata_id)
                 if not asset_metadata or asset_metadata.get("status") != "success":
                     return {"success": False, "error": f"Content metadata {content_metadata_id} not found"}
                 

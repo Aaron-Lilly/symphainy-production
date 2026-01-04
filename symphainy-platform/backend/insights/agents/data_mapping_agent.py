@@ -44,7 +44,7 @@ class DataMappingAgent:
         
         # Services (lazy initialization)
         self._embedding_service = None
-        self._content_steward = None
+        self._data_steward = None
         self._llm_composition = None
     
     async def _get_embedding_service(self):

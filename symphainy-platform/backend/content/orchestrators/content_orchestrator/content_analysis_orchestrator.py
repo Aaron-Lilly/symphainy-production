@@ -782,9 +782,9 @@ class ContentOrchestrator(OrchestratorBase):
             
             # Get Content Steward for proper file storage (GCS + Supabase)
             # Access via OrchestratorBase (delegates to RealmServiceBase)
-            content_steward = await self.get_content_steward_api()
+            data_steward = await self.get_data_steward_api()
             
-            if not content_steward:
+            if not data_steward:
                 raise Exception("Content Steward service not available - file upload requires infrastructure")
             
             # Prepare metadata for Content Steward with proper field names
@@ -832,7 +832,7 @@ class ContentOrchestrator(OrchestratorBase):
             else:
                 self.logger.warning(f"⚠️ [handle_content_upload] No user context available in request context - permissions may be missing")
             
-            upload_result = await content_steward.process_upload(file_data, file_type, metadata, user_context)
+            upload_result = await data_steward.process_upload(file_data, file_type, metadata, user_context)
             
             # Extract file_id from result
             file_uuid = upload_result.get("uuid") or upload_result.get("file_id")

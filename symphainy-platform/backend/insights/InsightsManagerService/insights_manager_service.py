@@ -61,7 +61,7 @@ class InsightsManagerService(ManagerServiceBase, ManagerServiceProtocol):
         # Smart City Services (discovered via Curator for business-level operations)
         self.librarian = None  # Content metadata management
         self.data_steward = None  # Data operations
-        self.content_steward = None  # Content operations
+        self.data_steward = None  # Content operations
         
         # Service State
         self.is_infrastructure_connected = False

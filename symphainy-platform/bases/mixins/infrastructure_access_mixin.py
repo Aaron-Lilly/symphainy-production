@@ -70,7 +70,12 @@ class InfrastructureAccessMixin:
         self.logger.debug("Infrastructure access mixin initialized")
     
     def get_infrastructure_abstraction(self, name: str) -> Any:
-        """Get infrastructure abstraction by name with caching."""
+        """
+        Get infrastructure abstraction by name with caching.
+        
+        CRITICAL: This method only returns abstractions that the realm owns.
+        For cross-realm capabilities, use get_soa_api() instead.
+        """
         # Logger should be available (set during initialization)
         logger = self.logger if hasattr(self, 'logger') and self.logger else None
         
@@ -165,21 +170,83 @@ class InfrastructureAccessMixin:
                                 if logger:
                                     logger.error(f"❌ Error getting '{name}' from Experience Foundation SDK: {e2}")
                     
+                    # Suggest SOA API for cross-realm abstractions
+                    if hasattr(self.platform_gateway, '_suggest_soa_api'):
+                        suggested_api = self.platform_gateway._suggest_soa_api(name)
+                        if logger:
+                            logger.warning(
+                                f"⚠️ Realm '{realm_name}' cannot access '{name}' abstraction. "
+                                f"Use SOA API instead: {suggested_api}"
+                            )
+                        raise ValueError(
+                            f"Realm '{realm_name}' cannot access '{name}' abstraction. "
+                            f"Use SOA API instead: {suggested_api}. "
+                            f"Original error: {e}"
+                        )
+                    
                     # Re-raise the ValueError for other abstractions
                     raise ValueError(
-                        f"Realm '{realm_name}' cannot access '{name}' via Platform Gateway. Original error: {e}"
+                        f"Realm '{realm_name}' cannot access '{name}' via Platform Gateway. "
+                        f"Use SOA API for cross-realm communication. Original error: {e}"
                     )
             
             # Realm services (non-Smart City): Platform Gateway is required
             # No fallback to direct Public Works access (prevents backdoor)
             raise Exception(f"Platform Gateway not available - realm '{realm_name}' cannot access '{name}' abstraction without Platform Gateway")
             
-            self._abstraction_cache[name] = abstraction
-            return abstraction
         except Exception as e:
             if hasattr(self, 'logger') and self.logger:
                 self.logger.error(f"Failed to get infrastructure abstraction '{name}': {e}")
             raise
+    
+    async def get_soa_api(self, api_name: str) -> Any:
+        """
+        Get SOA API for cross-realm communication.
+        
+        This method should be used when a realm needs to access capabilities from another realm.
+        For example, Insights realm accessing Content realm's semantic_data via content.get_semantic_data.
+        
+        Args:
+            api_name: SOA API name (e.g., "content.parse_file", "post_office.get_websocket_endpoint")
+            
+        Returns:
+            SOA API callable (method) or service instance
+            
+        Raises:
+            ValueError: If realm doesn't have access to SOA API or service not found
+        """
+        logger = self.logger if hasattr(self, 'logger') and self.logger else None
+        
+        if not hasattr(self, 'platform_gateway') or not self.platform_gateway:
+            raise ValueError("Platform Gateway not available - cannot access SOA APIs")
+        
+        realm_name = getattr(self, 'realm_name', 'unknown')
+        
+        try:
+            soa_api = await self.platform_gateway.get_soa_api(realm_name, api_name)
+            if logger:
+                logger.debug(f"✅ Retrieved SOA API '{api_name}' for realm '{realm_name}'")
+            return soa_api
+        except Exception as e:
+            if logger:
+                logger.error(f"❌ Failed to get SOA API '{api_name}' for realm '{realm_name}': {e}")
+            raise
+    
+    def validate_soa_api_access(self, api_name: str) -> bool:
+        """
+        Validate if realm has access to SOA API (non-throwing).
+        
+        Args:
+            api_name: SOA API name (e.g., "content.parse_file")
+            
+        Returns:
+            True if realm has access, False otherwise
+        """
+        if not hasattr(self, 'platform_gateway') or not self.platform_gateway:
+            return False
+        
+        realm_name = getattr(self, 'realm_name', 'unknown')
+        return self.platform_gateway.validate_soa_api_access(realm_name, api_name)
     
     def get_auth_abstraction(self) -> Any:
         """Get authentication abstraction."""

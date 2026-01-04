@@ -38,15 +38,15 @@ class RealmOrchestration:
             }
             
             # Startup order (dependencies considered)
+            # Note: Content Steward consolidated into Data Steward
             startup_order = [
                 "security_guard",  # First: Security infrastructure
                 "traffic_cop",     # Second: Traffic management
                 "nurse",           # Third: Health monitoring
                 "librarian",       # Fourth: Knowledge management
-                "data_steward",    # Fifth: Data management
-                "content_steward", # Sixth: Content management
-                "post_office",     # Seventh: Communication
-                "conductor"        # Eighth: Workflow orchestration
+                "data_steward",    # Fifth: Data management (includes Content Steward capabilities)
+                "post_office",     # Sixth: Communication
+                "conductor"        # Seventh: Workflow orchestration
             ]
             
             # Determine which services to start
@@ -128,7 +128,7 @@ class RealmOrchestration:
                 "nurse": ("backend.smart_city.services.nurse.nurse_service", "NurseService"),
                 "librarian": ("backend.smart_city.services.librarian.librarian_service", "LibrarianService"),
                 "data_steward": ("backend.smart_city.services.data_steward.data_steward_service", "DataStewardService"),
-                "content_steward": ("backend.smart_city.services.content_steward.content_steward_service", "ContentStewardService"),
+                # Note: Content Steward consolidated into Data Steward - removed from registry
                 "post_office": ("backend.smart_city.services.post_office.post_office_service", "PostOfficeService"),
                 "conductor": ("backend.smart_city.services.conductor.conductor_service", "ConductorService"),
             }
@@ -152,6 +152,9 @@ class RealmOrchestration:
                 # Create service instance (Smart City services take di_container)
                 service_instance = service_class(di_container=self.service.di_container)
                 
+                # Register service for initialization (City Manager controls lifecycle)
+                await self.service.service_management_module.register_service_for_initialization(service_name)
+                
                 # Initialize service
                 try:
                     init_success = await service_instance.initialize()
@@ -170,6 +173,10 @@ class RealmOrchestration:
                             "service_name": service_name,
                             "error": error_msg
                         }
+                    
+                    # Mark service as initialized (City Manager lifecycle ownership)
+                    await self.service.service_management_module.mark_service_initialized(service_name)
+                    
                 except Exception as init_error:
                     error_msg = f"{service_name} initialization raised exception: {init_error}"
                     if self.logger:

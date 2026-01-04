@@ -839,12 +839,13 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             # Instead, call Content Steward directly for file storage.
             # ========================================================================
             
-            # Use Content Steward for proper file storage (GCS + Supabase)
+            # Use Data Steward for proper file storage (GCS + Supabase)
             # Access via OrchestratorBase (delegates to RealmServiceBase)
-            content_steward = await self.get_content_steward_api()
+            # Note: Content Steward consolidated into Data Steward
+            data_steward = await self.get_data_steward_api()
             
-            if not content_steward:
-                raise Exception("Content Steward service not available - file upload requires infrastructure")
+            if not data_steward:
+                raise Exception("Data Steward service not available - file upload requires infrastructure")
             
             # Step 3: Prepare metadata for Content Steward with proper field names
             # Check if this is an SOP/Workflow file that should be processed in Operations Pillar
@@ -888,7 +889,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             if copybook_file_id:
                 metadata["copybook_file_id"] = copybook_file_id
             
-            upload_result = await content_steward.process_upload(file_data, file_type, metadata)
+            upload_result = await data_steward.process_upload(file_data, file_type, metadata)
             
             # Extract file_id from result
             file_uuid = upload_result.get("uuid") or upload_result.get("file_id")
@@ -1089,9 +1090,9 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             # Retrieve copybook_file_id from file metadata if not provided as parameter
             if not copybook_file_id:
                 try:
-                    content_steward = await self.get_content_steward_api()
-                    if content_steward:
-                        file_info = await content_steward.get_file(file_id)
+                    data_steward = await self.get_data_steward_api()
+                    if data_steward:
+                        file_info = await data_steward.get_file(file_id)
                         if file_info:
                             # Check metadata for copybook_file_id
                             metadata = file_info.get("metadata") or file_info.get("service_context") or {}
@@ -1161,8 +1162,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     self.logger.info(f"✅ [process_file] JSONL conversion successful: {len(jsonl_bytes)} bytes")
                     
                     # Get Content Steward API
-                    content_steward = await self.get_content_steward_api()
-                    if not content_steward:
+                    data_steward = await self.get_data_steward_api()
+                    if not data_steward:
                         storage_error = "Content Steward service not available - cannot store parsed file"
                         self.logger.error(f"❌ {storage_error}")
                         # Return error - don't continue if Content Steward is unavailable
@@ -1177,7 +1178,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     
                     self.logger.info(f"✅ [process_file] Content Steward available, storing parsed file...")
                     # Store parsed file via Content Steward
-                    store_result = await content_steward.store_parsed_file(
+                    store_result = await data_steward.store_parsed_file(
                         file_id=file_id,
                         parsed_file_data=jsonl_bytes,
                         format_type="jsonl",  # JSONL format (was "parquet")
@@ -1223,14 +1224,14 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     # Update original file status to "parsed" after successful parsing
                     # Note: This is non-critical - if it fails, we still return success since storage succeeded
                     try:
-                        content_steward = await self.get_content_steward_api()
-                        if content_steward:
+                        data_steward = await self.get_data_steward_api()
+                        if data_steward:
                             # Get user context
                             ctx = get_request_user_context()
                             if not ctx:
                                 ctx = {"user_id": user_id}
                             
-                            await content_steward.update_file_metadata(
+                            await data_steward.update_file_metadata(
                                 file_id=file_id,
                                 metadata_updates={"status": "parsed"},
                                 user_context=ctx
@@ -1362,8 +1363,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             
             # Get parsed file metadata to build content_metadata
             # We need to get the parse result to build proper content_metadata
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "ContentSteward not available",
@@ -1372,7 +1373,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 }
             
             # Get parsed file (includes metadata with parse_result)
-            parsed_file = await content_steward.get_parsed_file(parsed_file_id, user_context)
+            parsed_file = await data_steward.get_parsed_file(parsed_file_id, user_context)
             if not parsed_file:
                 return {
                     "success": False,
@@ -1631,8 +1632,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             self.logger.info(f"📋 Listing uploaded files for user: {user_id}")
             
             # Get ContentStewardService via Curator (Smart City service - has proper realm access)
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "files": [],
@@ -1644,7 +1645,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             # ContentStewardService.list_files() handles realm permissions properly
             try:
                 user_context = {"user_id": user_id}
-                files = await content_steward.list_files(
+                files = await data_steward.list_files(
                     filters={"user_id": user_id},
                     user_context=user_context
                 )
@@ -2324,8 +2325,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             self.logger.info(f"📤 Exposing data via semantic layer: file_id={file_id}, parsed_file_id={parsed_file_id}")
             
             # Step 1: Get parsed file from Content Steward
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "ContentSteward not available",
@@ -2334,13 +2335,13 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             
             # If parsed_file_id not provided, get it from file metadata
             if not parsed_file_id:
-                file_info = await content_steward.get_file(file_id, user_context=user_context)
+                file_info = await data_steward.get_file(file_id, user_context=user_context)
                 if file_info and file_info.get("metadata"):
                     parsed_file_id = file_info.get("metadata", {}).get("parsed_file_id")
                     if not parsed_file_id:
                         # Try to get first parsed file for this file_id
                         # Query parsed files for this file_id
-                        parsed_files = await content_steward.list_parsed_files(file_id=file_id, user_context=user_context)
+                        parsed_files = await data_steward.list_parsed_files(file_id=file_id, user_context=user_context)
                         if parsed_files and isinstance(parsed_files, list) and len(parsed_files) > 0:
                             parsed_file_id = parsed_files[0].get("parsed_file_id")
             
@@ -2352,7 +2353,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 }
             
             # Get parsed file (summary/preview, not full data)
-            parsed_file = await content_steward.get_parsed_file(parsed_file_id, user_context=user_context)
+            parsed_file = await data_steward.get_parsed_file(parsed_file_id, user_context=user_context)
             if not parsed_file:
                 return {
                     "success": False,
@@ -2465,8 +2466,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             self.logger.info(f"👁️ Previewing parsed file: {parsed_file_id} (max_rows={max_rows}, max_columns={max_columns})")
             
             # Get Content Steward API
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "Content Steward not available",
@@ -2475,7 +2476,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             
             # Get parsed file from Content Steward (retrieves from parsed_data_files table + GCS)
             # With the fix to store_parsed_file(), parsed_file_id is now the actual GCS UUID
-            parsed_file = await content_steward.get_parsed_file(parsed_file_id)
+            parsed_file = await data_steward.get_parsed_file(parsed_file_id)
             
             if not parsed_file:
                 return {
@@ -2574,8 +2575,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             self.logger.info(f"📋 Listing parsed files for user: {user_id}" + (f" (file_id: {file_id})" if file_id else ""))
             
             # Get Content Steward API
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "parsed_files": [],
@@ -2587,7 +2588,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             # ContentSteward.list_parsed_files() requires file_id, so we need file_id to query
             if file_id:
                 # Get parsed files for this specific file
-                parsed_files_list = await content_steward.list_parsed_files(file_id)
+                parsed_files_list = await data_steward.list_parsed_files(file_id)
                 
                 # Format parsed files for frontend
                 formatted_files = []
@@ -2635,7 +2636,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 
                 # Query parsed_data_files directly by user_id
                 # This is more efficient than iterating through all uploaded files
-                all_parsed_files_raw = await content_steward.list_parsed_files(file_id=None, user_id=user_id, user_context=ctx)
+                all_parsed_files_raw = await data_steward.list_parsed_files(file_id=None, user_id=user_id, user_context=ctx)
                 
                 # Format parsed files for frontend
                 all_parsed_files = []
@@ -2739,8 +2740,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                     parsed_file_id_to_embeddings[parsed_file_id].append(emb_file)
             
             # Step 3: Get parsed file metadata for each parsed_file_id that has embeddings
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "parsed_files": [],
@@ -2752,7 +2753,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             for parsed_file_id, emb_files in parsed_file_id_to_embeddings.items():
                 try:
                     # Get parsed file metadata (includes ui_name from parsed_data_files table)
-                    parsed_file = await content_steward.get_parsed_file(parsed_file_id)
+                    parsed_file = await data_steward.get_parsed_file(parsed_file_id)
                     if parsed_file:
                         # Calculate total embeddings count
                         total_embeddings = sum(emb_file.get("embeddings_count", 0) for emb_file in emb_files)
@@ -2841,8 +2842,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             ctx = user_context or get_request_user_context()
             
             # Use ContentStewardService
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "files": [],
@@ -2851,7 +2852,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 }
             
             # Get dashboard files via ContentStewardService
-            result = await content_steward.get_dashboard_files(user_id=user_id, user_context=ctx)
+            result = await data_steward.get_dashboard_files(user_id=user_id, user_context=ctx)
             
             self.logger.info(f"✅ Dashboard files retrieved: {result.get('statistics', {})}")
             
@@ -2894,15 +2895,15 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             ctx = user_context or get_request_user_context()
             
             # Use ContentStewardService
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "Content Steward service not available"
                 }
             
             # Delete file via ContentStewardService
-            result = await content_steward.delete_file_by_type(
+            result = await data_steward.delete_file_by_type(
                 file_uuid=file_uuid,
                 file_type=file_type,
                 user_context=ctx
@@ -2945,8 +2946,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             ctx = get_request_user_context()
             
             # Use ContentStewardService instead of direct file_management access
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "statistics": {"uploaded": 0, "parsed": 0, "embedded": 0, "total": 0},
@@ -2955,7 +2956,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             
             # Get statistics via ContentStewardService
             try:
-                stats = await content_steward.get_file_statistics(user_id=user_id, user_context=ctx)
+                stats = await data_steward.get_file_statistics(user_id=user_id, user_context=ctx)
                 uploaded_count = stats.get("uploaded", 0)
                 parsed_count = stats.get("parsed", 0)
                 embedded_count = stats.get("embedded", 0)
@@ -3017,8 +3018,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             ctx = get_request_user_context()
             
             # Use ContentStewardService instead of direct file_management access
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "embedding_files": [],
@@ -3028,7 +3029,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             
             # Query embedding_files table via ContentStewardService
             try:
-                embedding_files_raw = await content_steward.list_embedding_files(
+                embedding_files_raw = await data_steward.list_embedding_files(
                     user_id=user_id,
                     parsed_file_id=parsed_file_id,
                     file_id=file_id,
@@ -3267,8 +3268,8 @@ class ContentJourneyOrchestrator(OrchestratorBase):
             self.logger.info(f"🗑️ Deleting file: {file_id}")
             
             # Get Content Steward API
-            content_steward = await self.get_content_steward_api()
-            if not content_steward:
+            data_steward = await self.get_data_steward_api()
+            if not data_steward:
                 return {
                     "success": False,
                     "error": "Content Steward not available"
@@ -3280,7 +3281,7 @@ class ContentJourneyOrchestrator(OrchestratorBase):
                 ctx = {"user_id": user_id}
             
             # Delete file via Content Steward
-            success = await content_steward.delete_file(file_id, ctx)
+            success = await data_steward.delete_file(file_id, ctx)
             
             if success:
                 self.logger.info(f"✅ File deleted successfully: {file_id}")

@@ -140,14 +140,15 @@ class SessionAbstraction:
             
             # Add infrastructure-level metadata if session exists
             if result:
-                enhanced_metadata = result.metadata or {}
+                # Preserve original metadata and add enhancements (don't overwrite)
+                enhanced_metadata = dict(result.metadata) if result.metadata else {}
                 enhanced_metadata.update({
                     "adapter_type": self.adapter_type,
                     "abstraction_layer": "session_abstraction",
                     "retrieved_at": datetime.utcnow().isoformat()
                 })
                 
-                # Create new session with enhanced metadata
+                # Create new session with enhanced metadata (preserving original)
                 result = Session(
                     session_id=result.session_id,
                     user_id=result.user_id,
@@ -158,7 +159,7 @@ class SessionAbstraction:
                     expires_at=result.expires_at,
                     last_accessed=result.last_accessed,
                     security_level=result.security_level,
-                    metadata=enhanced_metadata,
+                    metadata=enhanced_metadata,  # Contains original metadata + enhancements
                     tags=result.tags
                 )
             
@@ -582,8 +583,25 @@ class SessionAbstraction:
             self.logger.error(f"Failed to switch adapter: {e}")
             raise  # Re-raise for service layer to handle
     
-    def _enhance_context(self, context: SessionContext) -> SessionContext:
+    def _enhance_context(self, context: Optional[SessionContext]) -> SessionContext:
         """Add infrastructure-level context enhancements."""
+        # Handle None context
+        if context is None:
+            # Create default context with infrastructure metadata
+            enhanced_metadata = {
+                "abstraction_layer": "session_abstraction",
+                "adapter_type": self.adapter_type,
+                "operation_timestamp": datetime.utcnow().isoformat()
+            }
+            return SessionContext(
+                service_id="unknown",
+                agent_id=None,
+                tenant_id=None,
+                environment="production",
+                region="default",
+                metadata=enhanced_metadata
+            )
+        
         # Add infrastructure metadata
         enhanced_metadata = context.metadata or {}
         enhanced_metadata.update({

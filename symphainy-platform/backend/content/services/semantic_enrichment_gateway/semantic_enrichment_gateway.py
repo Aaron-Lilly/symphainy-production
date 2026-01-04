@@ -60,7 +60,7 @@ class SemanticEnrichmentGateway(RealmServiceBase):
         # Smart City service APIs (will be initialized in initialize())
         self.librarian = None
         self.semantic_data = None  # SemanticDataAbstraction for storing embeddings
-        self.content_steward = None  # For enrichment service (secure boundary)
+        self.data_steward = None  # For enrichment service (secure boundary)
         self.nurse = None  # For observability
         
         # Enrichment service (runs in secure boundary - can access parsed data)

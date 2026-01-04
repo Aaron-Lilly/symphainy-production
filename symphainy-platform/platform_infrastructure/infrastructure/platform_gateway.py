@@ -44,79 +44,143 @@ class PlatformInfrastructureGateway:
     REALM_ABSTRACTION_MAPPINGS = {
         "smart_city": {
             "abstractions": [
+                # Smart City owns ALL abstractions (infrastructure layer)
                 "session", "state", "auth", "authorization", "tenant",
                 "file_management", "content_metadata", "content_schema", 
                 "content_insights", "llm", "mcp", "policy", "cache",
-                "api_gateway"
-                # REMOVED: "messaging", "event_management", "websocket", "event_bus"
-                # Smart City should get communication capabilities from Communication Foundation via Platform Gateway
-            ],
-            "description": "Smart City - First-class citizen with full access (except communication abstractions)",
-            "byoi_support": True
-        },
-        "business_enablement": {
-            "abstractions": [
-                "content_metadata", "content_schema", "content_insights", 
-                "file_management", "llm", "document_intelligence",
-                "semantic_data",  # ✅ NEW: For embeddings and semantic graphs
-                "bpmn_processing", "sop_processing", "sop_enhancement",
-                "strategic_planning", "financial_analysis", "workflow_diagramming_orchestration",
-                "visualization", "business_metrics",
-                # New file parsing abstractions (5-layer architecture)
+                "api_gateway", "messaging", "event_bus", "websocket_gateway",
+                # All file parsing abstractions (for infrastructure operations)
                 "excel_processing", "csv_processing", "json_processing", "text_processing",
                 "pdf_processing", "word_processing", "html_processing", "image_processing",
-                "mainframe_processing"
+                "mainframe_processing",
+                # All analysis abstractions (for infrastructure operations)
+                "visualization", "business_metrics",
+                # Semantic data (for infrastructure operations)
+                "semantic_data"
             ],
-            "description": "Business workflow capabilities",
-            "byoi_support": False
+            "soa_apis": [],  # Smart City doesn't need SOA APIs (it owns everything)
+            "description": "Smart City - Infrastructure layer with full access",
+            "byoi_support": True
         },
         "content": {
             "abstractions": [
-                "file_management", "content_metadata",
-                "semantic_data",  # ✅ For embedding creation and storage (Content creates semantic data layer)
-                # File parsing abstractions (5-layer architecture) - needed for FileParserService
+                # Content realm owns ALL file parsing abstractions (foundation layer)
                 "excel_processing", "csv_processing", "json_processing", "text_processing",
                 "pdf_processing", "word_processing", "html_processing", "image_processing",
-                "mainframe_processing"
+                "mainframe_processing",
+                # Content realm owns semantic data creation (CRITICAL - creates data mash)
+                "semantic_data",
+                # Content realm owns file operations
+                "file_management", "content_metadata"
             ],
-            "description": "Content processing, file parsing, and semantic data layer creation",
-            "byoi_support": False
-        },
-        "solution": {
-            "abstractions": [
-                "llm", "content_metadata", "file_management",
-                "semantic_data"  # ✅ For embedding retrieval via FrontendGatewayService (platform-wide gateway)
+            "soa_apis": [
+                # Content realm can access Post Office for event publishing (cross-realm communication)
+                "post_office.publish_event",
+                "post_office.subscribe_to_events",
+                # Content realm can access Traffic Cop for session management
+                "traffic_cop.get_session",
+                "traffic_cop.update_session"
             ],
-            "description": "Solution design capabilities",
-            "byoi_support": False
-        },
-        "journey": {
-            "abstractions": [
-                "llm", "session", "content_metadata",
-                "semantic_data"  # ✅ For embedding creation and semantic layer access (ContentJourneyOrchestrator)
-            ],
-            "description": "Journey orchestration capabilities",
+            "description": "Content Realm - Data front door, file parsing, semantic data creation",
             "byoi_support": False
         },
         "insights": {
             "abstractions": [
-                "file_management", "content_metadata", "content_insights",
-                "llm", "semantic_data",  # For data analysis and semantic queries
-                "visualization", "business_metrics"  # For visualization and metrics
+                # Insights realm owns analysis abstractions (analysis layer)
+                "visualization", "business_metrics", "content_insights"
+                # NOTE: semantic_data, file_management, content_metadata accessed via Content SOA APIs
             ],
-            "description": "Data analysis and insights generation capabilities",
+            "soa_apis": [
+                "content.parse_file",
+                "content.create_embeddings",
+                "content.get_semantic_data",
+                "content.get_file",
+                "content.get_metadata",
+                "post_office.publish_event",  # ✅ Event bus SOA API
+                "post_office.subscribe_to_events"  # ✅ Event bus SOA API
+            ],
+            "description": "Insights Realm - Analysis (consumes Content Realm semantic substrate)",
+            "byoi_support": False
+        },
+        "journey": {
+            "abstractions": [
+                # Journey realm owns orchestration abstractions (NOT infrastructure)
+                "session_orchestration", "state_orchestration"
+                # NOTE: Session/state infrastructure accessed via Traffic Cop SOA APIs
+                # NOTE: All data/analysis abstractions accessed via Content/Insights SOA APIs
+            ],
+            "soa_apis": [
+                "content.parse_file",
+                "content.create_embeddings",
+                "content.get_semantic_data",
+                "insights.analyze_data",
+                "insights.validate_quality",
+                "insights.generate_visualizations",
+                "post_office.publish_event",  # ✅ Event bus SOA API
+                "post_office.subscribe_to_events",  # ✅ Event bus SOA API
+                "traffic_cop.get_session",
+                "traffic_cop.update_session"
+            ],
+            "description": "Journey Realm - Workflow orchestration (composes Content/Insights capabilities)",
+            "byoi_support": False
+        },
+        "solution": {
+            "abstractions": [
+                # Solution realm owns minimal abstractions (entry point layer)
+                "solution_context"  # For landing page context (disseminated to other realms)
+                # NOTE: NO "llm" abstraction - LLMs must ONLY be accessed via agents (platform rule)
+                # NOTE: Solution realm uses agents for any LLM needs (via Agentic Foundation SDK)
+                # NOTE: All other abstractions accessed via lower realm SOA APIs
+            ],
+            "soa_apis": [
+                "content.parse_file",
+                "content.get_semantic_data",
+                "insights.analyze_data",
+                "insights.generate_visualizations",
+                "journey.execute_content_workflow",
+                "journey.execute_insights_workflow",
+                "journey.manage_session",
+                "post_office.get_websocket_endpoint",
+                "post_office.publish_to_agent_channel",
+                "post_office.publish_event",  # ✅ Event bus SOA API
+                "post_office.subscribe_to_events",  # ✅ Event bus SOA API
+                "traffic_cop.get_session",
+                "data_steward.store_file",
+                "librarian.search_content"
+            ],
+            "description": "Solution Realm - Entry point (composes Journey/Insights/Content capabilities)",
+            "byoi_support": False
+        },
+        "business_enablement": {
+            "abstractions": [
+                # Business Enablement is legacy - will be phased out
+                # Keeping for backward compatibility during migration
+                "content_metadata", "content_schema", "content_insights", 
+                "file_management", "llm", "document_intelligence",
+                "semantic_data",
+                "bpmn_processing", "sop_processing", "sop_enhancement",
+                "strategic_planning", "financial_analysis", "workflow_diagramming_orchestration",
+                "visualization", "business_metrics",
+                "excel_processing", "csv_processing", "json_processing", "text_processing",
+                "pdf_processing", "word_processing", "html_processing", "image_processing",
+                "mainframe_processing"
+            ],
+            "soa_apis": [],
+            "description": "Business Enablement - Legacy realm (being phased out)",
             "byoi_support": False
         }
     }
     
-    def __init__(self, public_works_foundation: Any):
+    def __init__(self, public_works_foundation: Any, di_container: Any = None):
         """
         Initialize Platform Infrastructure Gateway.
         
         Args:
             public_works_foundation: Public Works Foundation Service instance
+            di_container: Optional DI Container for accessing Curator (for SOA API discovery)
         """
         self.public_works_foundation = public_works_foundation
+        self.di_container = di_container
         self.logger = logging.getLogger(f"{__name__}.PlatformGateway")
         self.is_initialized = False
         
@@ -125,7 +189,10 @@ class PlatformInfrastructureGateway:
             "total_requests": 0,
             "successful_requests": 0,
             "denied_requests": 0,
-            "realm_access_counts": {}
+            "realm_access_counts": {},
+            "soa_api_requests": 0,
+            "soa_api_successful": 0,
+            "soa_api_denied": 0
         }
         
         self.logger.info("✅ Platform Infrastructure Gateway initialized")
@@ -240,6 +307,162 @@ class PlatformInfrastructureGateway:
             description=mapping["description"],
             byoi_support=mapping.get("byoi_support", False)
         )
+    
+    # ============================================================================
+    # SOA API ACCESS METHODS (Cross-Realm Communication)
+    # ============================================================================
+    
+    def validate_soa_api_access(self, realm_name: str, api_name: str) -> bool:
+        """
+        Validate if realm has access to SOA API.
+        
+        Args:
+            realm_name: Name of the requesting realm
+            api_name: SOA API name (e.g., "content.parse_file", "post_office.get_websocket_endpoint")
+            
+        Returns:
+            True if realm has access, False otherwise
+        """
+        if realm_name not in self.REALM_ABSTRACTION_MAPPINGS:
+            return False
+        
+        soa_apis = self.REALM_ABSTRACTION_MAPPINGS[realm_name].get("soa_apis", [])
+        return api_name in soa_apis
+    
+    def get_realm_soa_apis(self, realm_name: str) -> List[str]:
+        """
+        Get all SOA APIs allowed for a realm.
+        
+        Args:
+            realm_name: Name of the realm
+            
+        Returns:
+            List of SOA API names the realm can access
+        """
+        if realm_name not in self.REALM_ABSTRACTION_MAPPINGS:
+            return []
+        
+        return self.REALM_ABSTRACTION_MAPPINGS[realm_name].get("soa_apis", [])
+    
+    async def get_soa_api(self, realm_name: str, api_name: str) -> Any:
+        """
+        Get SOA API for cross-realm communication.
+        
+        Args:
+            realm_name: Name of the requesting realm
+            api_name: SOA API name (e.g., "content.parse_file", "post_office.get_websocket_endpoint")
+            
+        Returns:
+            SOA API callable (method) or service instance
+            
+        Raises:
+            ValueError: If realm doesn't have access to SOA API or service not found
+        """
+        self.access_metrics["soa_api_requests"] += 1
+        
+        # Validate realm access
+        if not self.validate_soa_api_access(realm_name, api_name):
+            self.access_metrics["soa_api_denied"] += 1
+            allowed = self.get_realm_soa_apis(realm_name)
+            raise ValueError(
+                f"Realm '{realm_name}' does not have access to SOA API '{api_name}'. "
+                f"Allowed SOA APIs: {allowed}"
+            )
+        
+        # Parse API name (service.method or service)
+        api_parts = api_name.split(".", 1)
+        service_name = api_parts[0]
+        method_name = api_parts[1] if len(api_parts) > 1 else None
+        
+        # Map SOA API names to actual service methods
+        # Some SOA APIs have different method names than the service methods
+        soa_api_method_mapping = {
+            "post_office.publish_event": "publish_event_soa",
+            "post_office.subscribe_to_events": "subscribe_to_events_soa",
+            "post_office.get_websocket_endpoint": "get_websocket_endpoint",
+            "post_office.publish_to_agent_channel": "publish_to_agent_channel",
+            "traffic_cop.get_session": "get_session",
+            "traffic_cop.update_session": "update_session",
+            "data_steward.store_file": "store_file",
+            "librarian.search_content": "search_content",
+            "content.parse_file": "parse_file",
+            "content.create_embeddings": "create_embeddings",
+            "content.get_semantic_data": "get_semantic_data",
+            "content.get_file": "get_file",
+            "content.get_metadata": "get_metadata",
+            "insights.analyze_data": "analyze_data",
+            "insights.validate_quality": "validate_quality",
+            "insights.generate_visualizations": "generate_visualizations",
+            "journey.execute_content_workflow": "execute_content_workflow",
+            "journey.execute_insights_workflow": "execute_insights_workflow",
+            "journey.manage_session": "manage_session"
+        }
+        
+        # Use mapped method name if available
+        if api_name in soa_api_method_mapping:
+            method_name = soa_api_method_mapping[api_name]
+        
+        # Get Curator from DI Container
+        if not self.di_container:
+            raise ValueError("DI Container not available - cannot discover services for SOA API access")
+        
+        curator = self.di_container.get_foundation_service("CuratorFoundationService")
+        if not curator:
+            raise ValueError("Curator Foundation not available - cannot discover services for SOA API access")
+        
+        # Discover service via Curator
+        try:
+            service = await curator.discover_service_by_name(service_name)
+            if not service:
+                # Try with "Service" suffix
+                service = await curator.discover_service_by_name(f"{service_name}Service")
+            
+            if not service:
+                raise ValueError(f"Service '{service_name}' not found via Curator")
+            
+            # If method_name specified, return the method; otherwise return service instance
+            if method_name:
+                if not hasattr(service, method_name):
+                    raise ValueError(f"Service '{service_name}' does not have method '{method_name}'")
+                method = getattr(service, method_name)
+                if not callable(method):
+                    raise ValueError(f"'{method_name}' on service '{service_name}' is not callable")
+                
+                self.access_metrics["soa_api_successful"] += 1
+                self.logger.debug(f"✅ Granted '{realm_name}' access to SOA API '{api_name}'")
+                return method
+            else:
+                # Return service instance
+                self.access_metrics["soa_api_successful"] += 1
+                self.logger.debug(f"✅ Granted '{realm_name}' access to SOA API '{api_name}' (service instance)")
+                return service
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get SOA API '{api_name}' for realm '{realm_name}': {e}")
+            raise ValueError(f"Failed to get SOA API '{api_name}': {e}")
+    
+    def _suggest_soa_api(self, abstraction_name: str) -> str:
+        """
+        Suggest SOA API for an abstraction name (helper for error messages).
+        
+        Args:
+            abstraction_name: Name of the abstraction
+            
+        Returns:
+            Suggested SOA API name
+        """
+        # Simple mapping for common abstractions
+        suggestions = {
+            "semantic_data": "content.get_semantic_data",
+            "file_management": "content.get_file",
+            "content_metadata": "content.get_metadata",
+            "visualization": "insights.generate_visualizations",
+            "business_metrics": "insights.calculate_metrics",
+            "session": "traffic_cop.get_session",
+            "state": "traffic_cop.update_session"
+        }
+        
+        return suggestions.get(abstraction_name, f"<realm>.<operation>")
     
     # ============================================================================
     # BULK INITIALIZATION METHODS

@@ -57,11 +57,18 @@ class WebSocketSessionManagement:
                     "session_id": session_id
                 }
             
-            # Store WebSocket connection info
-            if session_id not in self.service.websocket_connections:
-                self.service.websocket_connections[session_id] = {}
+            # Check if connection registry is available (Redis-backed for horizontal scaling)
+            if not self.service.websocket_connection_registry:
+                await self.service.record_health_metric("link_websocket_registry_unavailable", 1.0, {"session_id": session_id})
+                await self.service.log_operation_with_telemetry("link_websocket_to_session_complete", success=False, details={"error": "registry_unavailable"})
+                return {
+                    "success": False,
+                    "error": "WebSocket Connection Registry not available",
+                    "websocket_id": websocket_id,
+                    "session_id": session_id
+                }
             
-            # Store connection with metadata
+            # Store connection with metadata in Redis
             connection_info = {
                 "websocket_id": websocket_id,
                 "session_id": session_id,
@@ -71,25 +78,36 @@ class WebSocketSessionManagement:
                 "status": "active"
             }
             
-            # Key by agent_type and pillar for easy lookup
-            if agent_type:
-                if agent_type not in self.service.websocket_connections[session_id]:
-                    self.service.websocket_connections[session_id][agent_type] = {}
-                
-                if pillar:
-                    # Liaison agent with pillar
-                    self.service.websocket_connections[session_id][agent_type][pillar] = connection_info
-                else:
-                    # Guide agent (no pillar)
-                    self.service.websocket_connections[session_id][agent_type]["default"] = connection_info
-            else:
-                # No agent type specified - store as generic
-                self.service.websocket_connections[session_id][websocket_id] = connection_info
+            # Register connection in Redis (for horizontal scaling)
+            metadata = {
+                "linked_at": connection_info["linked_at"],
+                "status": "active"
+            }
+            registered = await self.service.websocket_connection_registry.register_connection(
+                websocket_id=websocket_id,
+                session_id=session_id,
+                agent_type=agent_type,
+                pillar=pillar,
+                metadata=metadata
+            )
+            
+            if not registered:
+                await self.service.record_health_metric("link_websocket_registration_failed", 1.0, {"session_id": session_id})
+                await self.service.log_operation_with_telemetry("link_websocket_to_session_complete", success=False, details={"error": "registration_failed"})
+                return {
+                    "success": False,
+                    "error": "Failed to register connection in Redis",
+                    "websocket_id": websocket_id,
+                    "session_id": session_id
+                }
+            
+            # Get connection count for session (from Redis)
+            session_connections = await self.service.websocket_connection_registry.get_session_connections(session_id)
             
             # Update session data with WebSocket connection info
             session_updates = {
                 "websocket_connections": {
-                    "count": len(self.service.websocket_connections[session_id]),
+                    "count": len(session_connections),
                     "connections": {
                         websocket_id: {
                             "agent_type": agent_type,
@@ -159,37 +177,20 @@ class WebSocketSessionManagement:
             List of WebSocket connection IDs
         """
         try:
-            if session_id not in self.service.websocket_connections:
+            # Check if connection registry is available
+            if not self.service.websocket_connection_registry:
+                self.service.logger.warning("⚠️ WebSocket Connection Registry not available")
                 return []
             
-            connections = self.service.websocket_connections[session_id]
-            websocket_ids = []
+            # Get connections from Redis (with optional filters)
+            connections = await self.service.websocket_connection_registry.get_session_connections(
+                session_id=session_id,
+                agent_type=agent_type,
+                pillar=pillar
+            )
             
-            if agent_type:
-                if agent_type in connections:
-                    if pillar:
-                        # Specific liaison agent for pillar
-                        if pillar in connections[agent_type]:
-                            conn_info = connections[agent_type][pillar]
-                            websocket_ids.append(conn_info["websocket_id"])
-                    else:
-                        # All connections for agent type
-                        for key, conn_info in connections[agent_type].items():
-                            if isinstance(conn_info, dict) and "websocket_id" in conn_info:
-                                websocket_ids.append(conn_info["websocket_id"])
-            else:
-                # All connections for session
-                for key, value in connections.items():
-                    if isinstance(value, dict):
-                        if "websocket_id" in value:
-                            websocket_ids.append(value["websocket_id"])
-                        elif isinstance(value, dict):
-                            # Nested structure (agent_type -> pillar)
-                            for nested_key, nested_value in value.items():
-                                if isinstance(nested_value, dict) and "websocket_id" in nested_value:
-                                    websocket_ids.append(nested_value["websocket_id"])
-                    elif isinstance(key, str) and len(key) > 20:  # Likely a websocket_id
-                        websocket_ids.append(key)
+            # Extract websocket_ids
+            websocket_ids = [conn.get("websocket_id") for conn in connections if conn.get("websocket_id")]
             
             return websocket_ids
             
@@ -216,33 +217,41 @@ class WebSocketSessionManagement:
         )
         
         try:
-            # Find session for this WebSocket connection
+            # Check if connection registry is available
+            if not self.service.websocket_connection_registry:
+                await self.service.record_health_metric("route_websocket_message_registry_unavailable", 1.0, {"websocket_id": websocket_id})
+                await self.service.log_operation_with_telemetry("route_websocket_message_complete", success=False, details={"error": "registry_unavailable"})
+                return {
+                    "success": False,
+                    "error": "WebSocket Connection Registry not available",
+                    "websocket_id": websocket_id
+                }
+            
+            # Find session for this WebSocket connection (search Redis)
+            # Note: This requires searching, which is less efficient. Consider storing websocket_id -> session_id mapping.
+            # For now, we'll need to search all sessions or require session_id in message
+            # TODO: Add websocket_id -> session_id index for faster lookup
             session_id = None
             connection_info = None
             
-            for sid, connections in self.service.websocket_connections.items():
-                for key, value in connections.items():
-                    if isinstance(value, dict):
-                        if value.get("websocket_id") == websocket_id:
-                            session_id = sid
-                            connection_info = value
-                            break
-                        elif isinstance(value, dict):
-                            # Nested structure
-                            for nested_value in value.values():
-                                if isinstance(nested_value, dict) and nested_value.get("websocket_id") == websocket_id:
-                                    session_id = sid
-                                    connection_info = nested_value
-                                    break
-                    elif key == websocket_id:
-                        session_id = sid
-                        connection_info = {"websocket_id": websocket_id}
-                        break
-                
-                if session_id:
-                    break
+            # Try to get session_id from message metadata if available
+            if isinstance(message, dict) and "session_id" in message:
+                session_id = message.get("session_id")
+                connection_info = await self.service.websocket_connection_registry.get_connection(websocket_id, session_id)
+            else:
+                # Search pattern - this is inefficient but works
+                # In practice, messages should include session_id
+                self.service.logger.warning(f"⚠️ Routing WebSocket message without session_id - may be inefficient")
+                # For now, return error - caller should include session_id
+                await self.service.record_health_metric("route_websocket_message_no_session_id", 1.0, {"websocket_id": websocket_id})
+                await self.service.log_operation_with_telemetry("route_websocket_message_complete", success=False, details={"error": "no_session_id"})
+                return {
+                    "success": False,
+                    "error": "WebSocket message must include session_id for routing",
+                    "websocket_id": websocket_id
+                }
             
-            if not session_id:
+            if not session_id or not connection_info:
                 await self.service.record_health_metric("route_websocket_message_no_session", 1.0, {"websocket_id": websocket_id})
                 await self.service.log_operation_with_telemetry("route_websocket_message_complete", success=False, details={"error": "no_session"})
                 return {
@@ -321,46 +330,35 @@ class WebSocketSessionManagement:
         )
         
         try:
-            # Find and remove connection
-            if session_id:
-                sessions_to_check = [session_id]
-            else:
-                sessions_to_check = list(self.service.websocket_connections.keys())
+            # Check if connection registry is available
+            if not self.service.websocket_connection_registry:
+                await self.service.record_health_metric("unlink_websocket_registry_unavailable", 1.0, {"websocket_id": websocket_id})
+                await self.service.log_operation_with_telemetry("unlink_websocket_from_session_complete", success=False, details={"error": "registry_unavailable"})
+                return {
+                    "success": False,
+                    "error": "WebSocket Connection Registry not available",
+                    "websocket_id": websocket_id,
+                    "session_id": session_id
+                }
             
-            removed = False
-            for sid in sessions_to_check:
-                if sid in self.service.websocket_connections:
-                    connections = self.service.websocket_connections[sid]
-                    
-                    # Remove from nested structure
-                    for key, value in list(connections.items()):
-                        if isinstance(value, dict):
-                            if value.get("websocket_id") == websocket_id:
-                                del connections[key]
-                                removed = True
-                                break
-                            elif isinstance(value, dict):
-                                # Nested structure (agent_type -> pillar)
-                                for nested_key, nested_value in list(value.items()):
-                                    if isinstance(nested_value, dict) and nested_value.get("websocket_id") == websocket_id:
-                                        del value[nested_key]
-                                        removed = True
-                                        break
-                        elif key == websocket_id:
-                            del connections[key]
-                            removed = True
-                            break
-                    
-                    if removed:
-                        # Update session data
-                        session_updates = {
-                            "websocket_connections": {
-                                "count": len(connections),
-                                "connections": {}
-                            }
-                        }
-                        await self.service.session_abstraction.update_session(sid, session_updates)
-                        break
+            # Unregister connection from Redis
+            removed = await self.service.websocket_connection_registry.unregister_connection(
+                websocket_id=websocket_id,
+                session_id=session_id
+            )
+            
+            if removed and session_id:
+                # Get updated connection count
+                session_connections = await self.service.websocket_connection_registry.get_session_connections(session_id)
+                
+                # Update session data
+                session_updates = {
+                    "websocket_connections": {
+                        "count": len(session_connections),
+                        "connections": {}
+                    }
+                }
+                await self.service.session_abstraction.update_session(session_id, session_updates)
             
             if removed:
                 # Record health metric

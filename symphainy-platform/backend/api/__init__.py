@@ -129,16 +129,52 @@ async def register_api_routers(app: FastAPI, platform_orchestrator) -> None:
                 if hasattr(post_office_service, 'websocket_gateway_service') and post_office_service.websocket_gateway_service:
                     websocket_gateway_service = post_office_service.websocket_gateway_service
                     
-                    # Verify it's ready
-                    if await websocket_gateway_service.is_ready():
-                        # Set in router
-                        set_websocket_gateway_service(websocket_gateway_service)
-                        
-                        # Register router
-                        app.include_router(websocket_gateway_router)
-                        logger.info("✅ WebSocket Gateway router registered with FastAPI app")
+                    # Set in router (needed for health/test endpoints even if not fully ready)
+                    set_websocket_gateway_service(websocket_gateway_service)
+                    
+                    # Register router
+                    # WebSocket endpoint is at /ws (no prefix), health/test endpoints need /api prefix
+                    # Keep original router for WebSocket endpoint
+                    app.include_router(websocket_gateway_router)
+                    
+                    # Create separate router for health/test HTTP endpoints with /api prefix
+                    # These endpoints should be available even if gateway isn't fully ready
+                    from fastapi import APIRouter
+                    api_router = APIRouter(prefix="/api")
+                    
+                    # Import the endpoint functions
+                    from backend.api.websocket_gateway_router import (
+                        websocket_gateway_health,
+                        test_get_connection,
+                        test_get_connections_by_channel,
+                        test_get_connection_count
+                    )
+                    
+                    # Register endpoints using router decorators
+                    @api_router.get("/health/websocket-gateway")
+                    async def health_endpoint():
+                        return await websocket_gateway_health()
+                    
+                    @api_router.get("/test/websocket-gateway/connection/{connection_id}")
+                    async def test_connection_endpoint(connection_id: str):
+                        return await test_get_connection(connection_id)
+                    
+                    @api_router.get("/test/websocket-gateway/channel/{channel}/connections")
+                    async def test_channel_endpoint(channel: str):
+                        return await test_get_connections_by_channel(channel)
+                    
+                    @api_router.get("/test/websocket-gateway/connection-count")
+                    async def test_count_endpoint():
+                        return await test_get_connection_count()
+                    
+                    app.include_router(api_router)
+                    
+                    # Check readiness for logging
+                    is_ready = await websocket_gateway_service.is_ready()
+                    if is_ready:
+                        logger.info("✅ WebSocket Gateway router registered (WebSocket at /ws, health/test at /api) - Gateway ready")
                     else:
-                        logger.warning("⚠️ WebSocket Gateway Service not ready - router not registered")
+                        logger.info("✅ WebSocket Gateway router registered (WebSocket at /ws, health/test at /api) - Gateway not fully ready yet")
                 else:
                     logger.warning("⚠️ PostOfficeService does not have WebSocketGatewayService - router not registered")
                     logger.warning("   PostOfficeService may not be fully initialized")

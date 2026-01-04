@@ -41,8 +41,8 @@ class Initialization:
                 self.service.logger.warning("⚠️ Librarian service not available")
             
             # Content Steward - Content operations
-            self.service.content_steward = await self.service.get_content_steward_api()
-            if not self.service.content_steward and hasattr(self.service, 'logger') and self.service.logger:
+            self.service.data_steward = await self.service.get_data_steward_api()
+            if not self.service.data_steward and hasattr(self.service, 'logger') and self.service.logger:
                 self.service.logger.warning("⚠️ Content Steward service not available")
             
             # Data Steward - Data operations

@@ -56,8 +56,7 @@ class FileParserService(RealmServiceBase):
         # Smart City service APIs (will be initialized in initialize())
         # Business Enablement uses Smart City SOA APIs, not direct infrastructure access
         self.librarian = None
-        self.content_steward = None  # Primary API for file retrieval
-        self.data_steward = None
+        self.data_steward = None  # Primary API for file retrieval (Content Steward consolidated)
         self.nurse = None  # ✅ Added for observability
         
         # Supported file formats

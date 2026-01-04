@@ -12,7 +12,8 @@ from .nurse.nurse_service import NurseService
 from .librarian.librarian_service import LibrarianService
 from .conductor.conductor_service import ConductorService
 from .post_office.post_office_service import PostOfficeService
-from .content_steward.content_steward_service import ContentStewardService
+# Content Steward was archived - functionality consolidated into Data Steward
+# from .content_steward.content_steward_service import ContentStewardService
 from .data_steward.data_steward_service import DataStewardService
 
 __all__ = [
@@ -23,7 +24,7 @@ __all__ = [
     'LibrarianService',
     'ConductorService',
     'PostOfficeService',
-    'ContentStewardService',
+    # ContentStewardService was archived - functionality consolidated into DataStewardService
     'DataStewardService'
 ]
 

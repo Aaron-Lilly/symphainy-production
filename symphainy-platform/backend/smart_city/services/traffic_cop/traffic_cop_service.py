@@ -70,7 +70,8 @@ class TrafficCopService(SmartCityRoleBase, TrafficCopServiceProtocol):
         self.load_balancing_counters: Dict[str, int] = {}
         self.rate_limit_counters: Dict[str, Dict[str, Any]] = {}
         self.api_routes: Dict[str, Dict[str, Any]] = {}
-        self.websocket_connections: Dict[str, Dict[str, Any]] = {}
+        # WebSocket connections now stored in Redis via connection_registry (removed in-memory dict for horizontal scaling)
+        self.websocket_connection_registry = None
         
         # Traffic analytics
         self.traffic_metrics: Dict[str, Any] = {
